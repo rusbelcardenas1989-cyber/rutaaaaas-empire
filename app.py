@@ -2,19 +2,20 @@ import streamlit as st
 import cv2
 import numpy as np
 import easyocr
+import re
 
-st.set_page_config(page_title="Extractor de Rutas - Modo Inteligente", layout="wide")
+st.set_page_config(page_title="Extractor de Rutas - Estable", layout="wide")
 
-st.title("⚔️ Panel de Control - Filtro de Columnas Inteligente")
-st.write("Esta versión lee la imagen completa y separa los datos por su posición de izquierda a derecha. ¡No más IDs mezclados!")
+st.title("⚔️ Panel de Control - Extracción Inteligente por Columnas")
+st.write("Sube las capturas de pantalla. Esta versión corregida analiza el contenido de cada bloque para evitar mezclas.")
 
-# Bases de datos en memoria
+# Asegurar almacenamiento en memoria
 if "mis_ciudades" not in st.session_state:
     st.session_state["mis_ciudades"] = {}
 if "ciudades_amigos" not in st.session_state:
     st.session_state["ciudades_amigos"] = {}
 
-# Menú lateral
+# Menú lateral para rangos de estrategia
 st.sidebar.header("⚙️ Ajuste de Rangos Máximos")
 max_pob = st.sidebar.slider("Diferencia Máxima de Población", min_value=100, max_value=10000, value=4999, step=1)
 max_edi = st.sidebar.slider("Diferencia Máxima de Edificios", min_value=1, max_value=50, value=20, step=1)
@@ -27,85 +28,101 @@ if st.sidebar.button("🧹 Limpiar Todo"):
 
 @st.cache_resource
 def load_ocr():
-    # Leemos texto completo para recuperar nombres e IDs reales
     return easyocr.Reader(['es', 'en'], gpu=False)
 
 reader = load_ocr()
 
-def procesar_captura_inteligente(archivos_subidos):
+def procesar_tabla_robusta(archivos_subidos):
     ciudades_extraidas = {}
     
     for archivo in archivos_subidos:
         file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, 1)
         
-        # Lectura de la imagen completa
+        # Lectura completa de la imagen por la IA
         resultados_ocr = reader.readtext(img)
         
-        # 1. Agrupar bloques de texto por su altura (Fila vertical Y)
-        lineas = {}
+        # Agrupar las cajas de texto por filas verticales (coordenada Y)
+        filas = {}
         for (bbox, texto, prob) in resultados_ocr:
             y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
+            x_inicio = bbox[0][0]
+            
             encontrado = False
-            for y_base in lineas.keys():
-                if abs(y_base - y_centro) < 18:  # Tolerancia por fila
-                    lineas[y_base].append((bbox[0][0], texto)) # Guardamos posición X (izquierda a derecha) y texto
+            for y_base in filas.keys():
+                if abs(y_base - y_centro) < 15:  # Tolerancia de píxeles por fila
+                    filas[y_base].append((x_inicio, texto))
                     encontrado = True
                     break
             if not encontrado:
-                lineas[y_centro] = [(bbox[0][0], texto)]
+                filas[y_centro] = [(x_inicio, texto)]
         
-        # 2. Procesar cada fila analizando las posiciones de izquierda a derecha
-        for y_coord in sorted(lineas.keys()):
-            # Ordenamos los elementos de la fila horizontalmente (Eje X)
-            bloques_horizontales = sorted(lineas[y_coord], key=lambda x: x[0])
-            textos_limpios = [b[1].strip() for b in bloques_horizontales]
+        # Analizar cada fila de forma independiente
+        for y_coord in sorted(filas.keys()):
+            # Ordenar bloques de izquierda a derecha (coordenada X)
+            bloques = sorted(filas[y_coord], key=lambda x: x[0])
             
-            # Busquemos números válidos en la fila
-            numeros = []
-            for t in textos_limpios:
-                num_limpio = t.replace('.', '').replace(',', '').replace(' ', '').strip()
-                if num_limpio.isdigit():
-                    numeros.append(int(num_limpio))
+            id_detectado = None
+            nombre_detectado = []
+            numeros_encontrados = []
             
-            # Una fila válida debe tener mínimo el ID al inicio y otros números
-            if len(numeros) >= 3:
-                # El primer número de la izquierda SIEMPRE es el ID
-                id_ciudad = numeros[0]
+            for x_pos, texto in bloques:
+                texto_limpio = texto.strip()
+                if not texto_limpio:
+                    continue
                 
-                # El segundo número limpio (columna central) es la Población
-                poblacion = numeros[1]
+                # Quitar puntos y comas para verificar si es un número puro
+                solo_num = texto_limpio.replace('.', '').replace(',', '').replace(' ', '')
                 
-                # El último número a la extrema derecha SIEMPRE son los Edificios
-                edificios = numeros[-1]
+                if solo_num.isdigit():
+                    num_int = int(solo_num)
+                    # Si está muy a la izquierda y tiene 3 dígitos, es un ID seguro
+                    if id_detectado is None and num_int < 1000:
+                        id_detectado = num_int
+                    else:
+                        numeros_encontrados.append(num_int)
+                else:
+                    # Si tiene letras, es parte del Nombre del jugador
+                    # Ignoramos palabras del sistema como "ID", "Nombre", "Edif", "Región"
+                    if len(texto_limpio) > 1 and not any(w in texto_limpio.lower() for w in ["id", "nombre", "edif", "regi", "ciudad"]):
+                        nombre_detectado.append(texto_limpio)
+
+            # Si logramos identificar al menos el ID y algún dato numérico extra
+            if id_detectado is not None and len(numeros_encontrados) >= 1:
+                # Reconstruir el nombre completo si se dividió en pedazos
+                nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
                 
-                # Buscar el nombre (suele ser el bloque de texto en la posición 2 o 3 de la izquierda)
-                nombre_ciudad = f"Ciudad {id_ciudad}"
-                for txt in textos_limpios[1:4]:
-                    # Si el bloque contiene letras y no es un número puro, es el nombre del jugador
-                    if not txt.replace('.', '').replace(',', '').strip().isdigit() and len(txt) > 2:
-                        nombre_ciudad = txt
-                        break
+                # En tu juego la población siempre es un número grande (miles) y edificios es pequeño
+                poblacion = 0
+                edificios = 0
                 
-                # Validar que el ID tenga sentido (en tu juego son números de 3 dígitos usualmente)
-                if id_ciudad < 1000:
-                    ciudades_extraidas[id_ciudad] = {
-                        "ID": id_ciudad,
-                        "Nombre": nombre_ciudad,
+                # Filtrar si hay datos basura de otras columnas (como oro o recursos)
+                # Nos quedamos con los que encajen en los rangos lógicos del juego
+                for n in numeros_encontrados:
+                    if 10000 <= n <= 90000:  # Rango típico de población de tus imágenes
+                        poblacion = n
+                    elif 10 <= n <= 200:     # Rango típico de edificios
+                        edificios = n
+                
+                # Guardar solo si tiene datos mínimos coherentes
+                if poblacion > 0 or edificios > 0:
+                    ciudades_extraidas[id_detectado] = {
+                        "ID": id_detectado,
+                        "Nombre": nombre_final,
                         "Población": poblacion,
                         "Edificios": edificios
                     }
                     
     return ciudades_extraidas
 
-# --- INTERFAZ VISUAL (Dos columnas limpias) ---
+# --- INTERFAZ VISUAL ---
 col_izq, col_der = st.columns(2)
 
 with col_izq:
     st.subheader("👤 1. MIS CIUDADES (Prioritarias)")
-    mis_archivos = st.file_uploader("Sube TU captura completa aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
+    mis_archivos = st.file_uploader("Sube TU captura aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
     if mis_archivos:
-        st.session_state["mis_ciudades"].update(procesar_captura_inteligente(mis_archivos))
+        st.session_state["mis_ciudades"].update(procesar_tabla_robusta(mis_archivos))
     
     if st.session_state["mis_ciudades"]:
         lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
@@ -115,7 +132,7 @@ with col_der:
     st.subheader("👥 2. CIUDADES DE MIS AMIGOS")
     archivos_amigos = st.file_uploader("Sube las de tus AMIGOS aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ami_up")
     if archivos_amigos:
-        st.session_state["ciudades_amigos"].update(procesar_captura_inteligente(archivos_amigos))
+        st.session_state["ciudades_amigos"].update(procesar_tabla_robusta(archivos_amigos))
     
     if st.session_state["ciudades_amigos"]:
         lista_amigos = sorted(list(st.session_state["ciudades_amigos"].values()), key=lambda x: x["ID"])
@@ -123,7 +140,7 @@ with col_der:
 
 st.markdown("---")
 
-# --- GENERADOR TÁCTICO DE RUTAS ---
+# --- PANEL DE RUTAS ---
 st.subheader("🎯 Panel de Rutas Óptimas")
 
 mis_ciudades_lista = list(st.session_state["mis_ciudades"].values())
@@ -152,10 +169,9 @@ if mis_ciudades_lista and amigos_ciudades_lista:
         if opciones_validas:
             rutas_creadas += 1
             with st.expander(f"🚨 RUTA PARA: {mi_c['Nombre']} [ID {mi_c['ID']}] ({mi_c['Población']:,} Pob | {mi_c['Edificios']} Edif)"):
-                st.write("Ciudades de tus amigos que entran en el rango:")
                 st.table(opciones_validas)
                 
     if rutas_creadas == 0:
-        st.info("No se encontraron ciudades de amigos que coincidan con tus rangos.")
+        st.info("No se encontraron ciudades que coincidan con los rangos establecidos.")
 else:
-    st.info("Sube imágenes en ambos cuadros para calcular las rutas.")
+    st.info("Sube capturas en ambos cuadros para activar el cálculo de rutas.")
