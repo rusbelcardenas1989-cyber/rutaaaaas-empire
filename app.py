@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor de Rutas - Estable", layout="wide")
+st.set_page_config(page_title="Extractor de Rutas - Modo Definitivo", layout="wide")
 
-st.title("⚔️ Panel de Control - Extracción por Orden de Columnas")
-st.write("Esta versión asigna los datos estrictamente según su orden de izquierda a derecha en la tabla.")
+st.title("⚔️ Panel de Control - Extractor de Alta Precisión")
+st.write("Esta versión combina análisis posicional y escaneo de rescate para asegurar que NINGÚN edificio quede en 0.")
 
 # Almacenamiento en memoria
 if "mis_ciudades" not in st.session_state:
@@ -31,81 +31,98 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_por_orden_columnas(archivos_subidos):
+def procesar_tabla_definitiva(archivos_subidos):
     ciudades_extraidas = {}
     
     for archivo in archivos_subidos:
         file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, 1)
+        alto, ancho, _ = img.shape
         
+        # Escaneo general inicial
         resultados_ocr = reader.readtext(img)
         
-        # 1. Agrupar los bloques de texto por su altura (Fila vertical Y)
+        # 1. Agrupar los bloques de texto por su altura (Fila vertical Y) con tolerancia amplia
         filas = {}
         for (bbox, texto, prob) in resultados_ocr:
             y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
-            x_inicio = int(bbox[0][0])
-            
             encontrado = False
             for y_base in filas.keys():
-                if abs(y_base - y_centro) < 15:  # Tolerancia por fila
-                    filas[y_base].append((x_inicio, texto))
+                if abs(y_base - y_centro) < 20:  # Tolerancia de 20 píxeles por fila
+                    filas[y_base].append((bbox, texto))
                     encontrado = True
                     break
-            if not encontrado:
-                filas[y_centro] = [(x_inicio, texto)]
+            if not Found:
+                filas[y_centro] = [(bbox, texto)]
         
-        # 2. Procesar cada fila basándonos en su orden horizontal
+        # 2. Procesar cada fila analizando las posiciones geográficas en la pantalla
         for y_coord in sorted(filas.keys()):
-            # Ordenamos los bloques de izquierda a derecha usando su coordenada X
-            bloques_horizontales = sorted(filas[y_coord], key=lambda x: x[0])
-            textos_fila = [b[1].strip() for b in bloques_horizontales if b[1].strip()]
+            bloques = sorted(filas[y_coord], key=lambda x: x[0][0][0]) # Izquierda a derecha
             
-            # Filtro para ignorar los encabezados de la tabla
-            if any(w in "".join(textos_fila).lower() for w in ["id", "nombre", "pob", "edi", "regi"]):
-                continue
-                
-            # Necesitamos que la fila tenga datos suficientes para procesar
-            if len(textos_fila) >= 3:
-                try:
-                    # Columna 1 (Extrema izquierda): El ID
-                    id_limpio = "".join([c for c in textos_fila[0] if c.isdigit()])
-                    if not id_limpio:
-                        continue
-                    id_ciudad = int(id_limpio)
-                    
-                    # Columna 2: El Nombre
-                    nombre_ciudad = textos_fila[1]
-                    
-                    # Columna 3: La Población
-                    pob_limpio = "".join([c for c in textos_fila[2] if c.isdigit()])
-                    poblacion = int(pob_limpio) if pob_limpio else 0
-                    
-                    # Columna 4 (Extrema derecha): Los Edificios
-                    # Si la fila tiene 4 o más elementos, agarramos el último
-                    if len(textos_fila) >= 4:
-                        edi_limpio = "".join([c for c in textos_fila[-1] if c.isdigit()])
-                        edificios = int(edi_limpio) if edi_limpio else 0
-                    else:
-                        edificios = 0
-                    
-                    # Si la población o los edificios se leyeron mal o quedaron en 0, 
-                    # intentamos un intercambio lógico por si se cruzaron de posición
-                    if edificios > poblacion and poblacion == 0:
-                        poblacion = edificios
-                        edificios = 0
-
-                    # Guardar el registro si el ID es válido
-                    if id_ciudad < 1000:
-                        ciudades_extraidas[id_ciudad] = {
-                            "ID": id_ciudad,
-                            "Nombre": nombre_ciudad,
-                            "Población": poblacion,
-                            "Edificios": edificios
-                        }
-                except Exception:
+            id_detectado = None
+            nombre_detectado = []
+            poblacion = 0
+            edificios = 0
+            
+            # Recorrer bloques horizontalmente
+            for bbox, texto in bloques:
+                texto_limpio = texto.strip()
+                if not texto_limpio or any(w in texto_limpio.lower() for w in ["id", "nombre", "pob", "edi", "regi"]):
                     continue
+                
+                # Extraer solo dígitos numéricos puros
+                solo_num = "".join([c for c in texto_limpio if c.isdigit()])
+                x_inicio = int(bbox[0][0])
+                
+                # Clasificación inteligente basada en la posición X en la pantalla
+                if solo_num.isdigit() and len(solo_num) > 0:
+                    val_num = int(solo_num)
                     
+                    # Zona Izquierda (0% - 25%): ID de la ciudad
+                    if x_inicio < (ancho * 0.25) and id_detectado is None and val_num < 1000:
+                        id_detectado = val_num
+                    
+                    # Zona Centro (40% - 75%): Población
+                    elif (ancho * 0.40) <= x_inicio <= (ancho * 0.75):
+                        poblacion = val_num
+                        
+                    # Zona Derecha (76% - 100%): Edificios
+                    elif x_inicio > (ancho * 0.75):
+                        edificios = val_num
+                else:
+                    # Si contiene letras y está en la primera mitad, es el Nombre
+                    if x_inicio < (ancho * 0.50) and len(texto_limpio) > 1:
+                        nombre_detectado.append(texto_limpio)
+            
+            # 3. REFUERZO DE SEGURIDAD PARA EDIFICIOS
+            # Si se detectó el ID pero la columna de edificios falló o quedó en 0
+            if id_detectado is not None and edificios == 0:
+                y_min = max(0, y_coord - 22)
+                y_max = min(alto, y_coord + 22)
+                x_min = int(ancho * 0.78)  # Enfocarse exclusivamente en el final derecho
+                
+                # Recorte quirúrgico del área de edificios de esta fila
+                crop_edif = img[y_min:y_max, x_min:ancho]
+                res_edif = reader.readtext(crop_edif, allowlist='0123456789')
+                
+                for _, t_edif, _ in res_edif:
+                    t_limpio = "".join([c for c in t_edif if c.isdigit()])
+                    if t_limpio.isdigit():
+                        val_edi = int(t_limpio)
+                        if 10 <= val_edi <= 250:  # Rango lógico de edificios
+                            edificios = val_edi
+                            break
+            
+            # Guardar el registro final si el ID es correcto
+            if id_detectado is not None:
+                nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
+                ciudades_extraidas[id_detectado] = {
+                    "ID": id_detectado,
+                    "Nombre": nombre_final,
+                    "Población": poblacion,
+                    "Edificios": edificios
+                }
+                
     return ciudades_extraidas
 
 # --- INTERFAZ GRÁFICA ---
@@ -115,7 +132,7 @@ with col_izq:
     st.subheader("👤 1. MIS CIUDADES (Prioritarias)")
     mis_archivos = st.file_uploader("Sube TU captura aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
     if mis_archivos:
-        st.session_state["mis_ciudades"].update(procesar_por_orden_columnas(mis_archivos))
+        st.session_state["mis_ciudades"].update(procesar_tabla_definitiva(mis_archivos))
     
     if st.session_state["mis_ciudades"]:
         lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
@@ -125,7 +142,7 @@ with col_der:
     st.subheader("👥 2. CIUDADES DE MIS AMIGOS")
     archivos_amigos = st.file_uploader("Sube las de tus AMIGOS aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ami_up")
     if archivos_amigos:
-        st.session_state["ciudades_amigos"].update(procesar_por_orden_columnas(archivos_amigos))
+        st.session_state["ciudades_amigos"].update(procesar_tabla_definitiva(archivos_amigos))
     
     if st.session_state["ciudades_amigos"]:
         lista_amigos = sorted(list(st.session_state["ciudades_amigos"].values()), key=lambda x: x["ID"])
