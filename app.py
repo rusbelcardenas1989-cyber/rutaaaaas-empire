@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor de Rutas - Filtros Calibrados", layout="wide")
+st.set_page_config(page_title="Extractor de Rutas - Modo Definitivo", layout="wide")
 
 st.title("⚔️ Panel de Control - Extractor Inteligente")
-st.write("Sube tus capturas. Filtros ajustados: Población mínima 1,000 y Edificios máximos 330.")
+st.write("Sube tus capturas en los cuadros de abajo. Filtros ajustados: Población mínima 1,000 y Edificios máximos 330.")
 
 # Almacenamiento en memoria
 if "mis_ciudades" not in st.session_state:
@@ -75,7 +75,7 @@ def procesar_tabla_inteligente(archivos_subidos):
                     val_num = int(solo_num)
                     numeros_fila.append((x_inicio, val_num))
                 else:
-                    # Si tiene letras, asumimos que es parte del Nombre
+                    # Si contiene letras, asumimos que es parte del Nombre
                     if len(texto_limpio) > 1:
                         nombre_detectado.append(texto_limpio)
             
@@ -91,18 +91,17 @@ def procesar_tabla_inteligente(archivos_subidos):
                 edificios = 0
                 
                 for num in otros_numeros:
-                    # NUEVA CONDICIÓN: Población mínima de 1k (1000)
+                    # Filtro calibrado: Población mínima de 1000
                     if num >= 1000:
                         poblacion = num
-                    # NUEVA CONDICIÓN: Edificios máximo de 330
+                    # Filtro calibrado: Edificios máximo de 330
                     elif 10 <= num <= 330:
                         edificios = num
                 
-                # Si por error el ID se procesó como un número de ciudad gigante, lo saltamos
+                # Resguardar ID de ciudad válido
                 if id_detectado is not None and id_detectado < 1000:
                     nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
                     
-                    # Guardar solo si se logró rescatar al menos uno de los dos datos clave
                     if poblacion > 0 or edificios > 0:
                         ciudades_extraidas[id_detectado] = {
                             "ID": id_detectado,
@@ -113,7 +112,7 @@ def procesar_tabla_inteligente(archivos_subidos):
                     
     return ciudades_extraidas
 
-# --- INTERFAZ GRÁFICA ---
+# --- INTERFAZ GRÁFICA CORREGIDA ---
 col_izq, col_der = st.columns(2)
 
 with col_izq:
@@ -124,4 +123,46 @@ with col_izq:
     
     if st.session_state["mis_ciudades"]:
         lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
-        st.dataframe
+        st.dataframe(lista_mia, use_container_width=True)
+
+with col_der:
+    st.subheader("👥 2. CIUDADES DE MIS AMIGOS")
+    archivos_amigos = st.file_uploader("Sube las de tus AMIGOS aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ami_up")
+    if archivos_amigos:
+        st.session_state["ciudades_amigos"].update(procesar_tabla_inteligente(archivos_amigos))
+    
+    if st.session_state["ciudades_amigos"]:
+        lista_amigos = sorted(list(st.session_state["ciudades_amigos"].values()), key=lambda x: x["ID"])
+        st.dataframe(lista_amigos, use_container_width=True)
+
+st.markdown("---")
+
+# --- PROCESADOR TÁCTICO DE RUTAS ---
+st.subheader("🎯 Panel de Rutas Óptimas")
+
+mis_ciudades_lista = list(st.session_state["mis_ciudades"].values())
+amigos_ciudades_lista = list(st.session_state["ciudades_amigos"].values())
+
+if mis_ciudades_lista and amigos_ciudades_lista:
+    rutas_creadas = 0
+    
+    for mi_c in sorted(mis_ciudades_lista, key=lambda x: x["ID"]):
+        opciones_validas = []
+        for ca in amigos_ciudades_lista:
+            dif_pob = abs(mi_c["Población"] - ca["Población"])
+            dif_edi = abs(mi_c["Edificios"] - ca["Edificios"])
+            
+            if dif_pob <= max_pob and dif_edi <= max_edi:
+                opciones_validas.append({
+                    "ID Amigo": ca["ID"],
+                    "Nombre Amigo": ca["Nombre"],
+                    "Población": f"{ca['Población']:,}",
+                    "Edificios": ca["Edificios"],
+                    "Dif. Población": f"{dif_pob:,}",
+                    "Dif. Edificios": dif_edi,
+                    "Posición": "📈 Más alta" if ca["Población"] > mi_c["Población"] else "📉 Más baja"
+                })
+        
+        if opciones_validas:
+            rutas_creadas += 1
+            with st.expander(f"🚨 RUTA PARA: {mi_c['Nombre']}
