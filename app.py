@@ -3,9 +3,8 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor Definitivo", layout="wide")
-
-st.title("⚔️ Panel de Control - Extractor a Prueba de Errores")
+st.set_page_config(page_title="Extractor de Rutas", layout="wide")
+st.title("⚔️ Panel de Control - Extractor Estricto")
 
 if "mis_ciudades" not in st.session_state: st.session_state["mis_ciudades"] = {}
 if "ciudades_amigos" not in st.session_state: st.session_state["ciudades_amigos"] = {}
@@ -17,42 +16,28 @@ def load_ocr():
 reader = load_ocr()
 
 def procesar_fila_posicional(bloques_brutos):
-    # FILTRO DE SEGURIDAD REFORZADO
-    bloques_validos = []
-    for b in bloques_brutos:
-        # Verificamos que 'b' tenga el formato esperado: [bbox, texto, prob]
-        if isinstance(b, (list, tuple)) and len(b) >= 2:
-            bloques_validos.append(b)
-            
-    # Ordenar por coordenada X de la caja delimitadora (bbox)
-    # bbox es b[0], el punto superior izquierdo es b[0][0]
+    # Filtrar solo elementos válidos [bbox, texto, prob]
+    bloques_validos = [b for b in bloques_brutos if isinstance(b, (list, tuple)) and len(b) >= 2]
+    
+    # Ordenar estrictamente de izquierda a derecha por coordenada X
     bloques_validos.sort(key=lambda x: x[0][0][0])
     
     numeros = []
     nombre_partes = []
     
     for item in bloques_validos:
-        texto = str(item[1]) # El texto es el segundo elemento
-        texto_clean = texto.replace(".", "").replace(",", "").strip()
-        
-        if texto_clean.isdigit():
-            numeros.append(int(texto_clean))
-        elif len(texto_clean) > 2:
-            nombre_partes.append(texto_clean)
+        texto = str(item[1]).replace(".", "").replace(",", "").strip()
+        if texto.isdigit():
+            numeros.append(int(texto))
+        elif len(texto) > 2:
+            nombre_partes.append(texto)
             
     datos = {"ID": 0, "Nombre": " ".join(nombre_partes), "Población": 0, "Edificios": 0}
     
-    if numeros:
-        datos["ID"] = numeros[0]
-        if len(numeros) >= 2:
-            # Regla estricta: El último número detectado es Edificios si es <= 330
-            if numeros[-1] <= 330:
-                datos["Edificios"] = numeros[-1]
-                if len(numeros) > 2:
-                    datos["Población"] = numeros[1]
-            else:
-                # Si el último es > 330, lo tratamos como Población
-                datos["Población"] = numeros[-1]
+    # Asignación posicional literal
+    if len(numeros) >= 1: datos["ID"] = numeros[0]
+    if len(numeros) >= 2: datos["Población"] = numeros[1]
+    if len(numeros) >= 3: datos["Edificios"] = numeros[2]
                 
     return datos
 
@@ -63,8 +48,6 @@ def procesar_imagen(archivo):
     
     filas = {}
     for res in resultados:
-        # res es [bbox, texto, prob]
-        # Obtenemos la coordenada Y media de la caja para agrupar
         y = int((res[0][0][1] + res[0][2][1]) / 2)
         agrupado = False
         for y_base in filas:
@@ -76,12 +59,9 @@ def procesar_imagen(archivo):
             
     ciudades = {}
     for y in filas:
-        # Evitar procesar filas que sean encabezados
         if any("id" in str(b[1]).lower() for b in filas[y]): continue
-        
         ciudad = procesar_fila_posicional(filas[y])
-        if 0 < ciudad["ID"] < 1000: 
-            ciudades[ciudad["ID"]] = ciudad
+        if 0 < ciudad["ID"] < 1000: ciudades[ciudad["ID"]] = ciudad
     return ciudades
 
 # --- UI ---
