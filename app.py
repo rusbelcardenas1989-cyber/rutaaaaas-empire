@@ -70,7 +70,6 @@ def procesar_tabla_inteligente(archivos_subidos):
                 # Extraer solo dígitos numéricos puros
                 solo_num = "".join([c for c in texto_limpio if c.isdigit()])
                 
-                # CORRECCIÓN DE LA LÍNEA 67: Forzar la coordenada X a entero de forma segura
                 try:
                     x_inicio = int(bbox[0][0])
                 except (IndexError, TypeError, ValueError):
@@ -85,15 +84,108 @@ def procesar_tabla_inteligente(archivos_subidos):
                         nombre_detectado.append(texto_limpio)
             
             if numeros_fila:
-                # El ID siempre es el número que está más a la izquierda de la fila
-                numeros_ordenados_por_x = sorted(numeros_fila, key=lambda x: x[0])
-                id_detectado = numeros_ordenados_por_x[0][1]
+                # Ordenar todos los números de izquierda a derecha según su posición X
+                numeros_ordenados = sorted(numeros_fila, key=lambda x: x[0])
                 
-                # Descartamos el ID para analizar el resto de números (Población y Edificios)
-                otros_numeros = [n[1] for n in numeros_ordenados_por_x[1:]]
+                # El primero de la izquierda es el ID
+                id_detectado = int(numeros_ordenados[0][1])
                 
                 poblacion = 0
                 edificios = 0
                 
-                for num in otros_numeros:
-                    # Filtro calibr
+                # Si hay más números, los asignamos por orden de posición en pantalla
+                restantes = numeros_ordenados[1:]
+                
+                if len(restantes) == 1:
+                    # Si solo detectó un número extra, verificamos su tamaño
+                    val = int(restantes[0][1])
+                    if val >= 1000:
+                        poblacion = val
+                    elif 10 <= val <= 330:
+                        edificios = val
+                elif len(restantes) >= 2:
+                    # Si hay dos o más, el primero es Población y el segundo es Edificios
+                    val_1 = int(restantes[0][1])
+                    val_2 = int(restantes[1][1])
+                    
+                    poblacion = val_1 if val_1 >= 1000 else 0
+                    edificios = val_2 if 10 <= val_2 <= 330 else 0
+                
+                # Validar ID de ciudad correcto
+                if id_detectado is not None and id_detectado < 1000:
+                    nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
+                    
+                    # Forzar a que los datos se guarden de forma ultra estructurada
+                    ciudades_extraidas[id_detectado] = {
+                        "ID": int(id_detectado),
+                        "Nombre": str(nombre_final),
+                        "Población": int(poblacion),
+                        "Edificios": int(edificios)
+                    }
+                    
+    return ciudades_extraidas
+
+# --- INTERFAZ GRÁFICA ---
+col_izq, col_der = st.columns(2)
+
+with col_izq:
+    st.subheader("👤 1. MIS CIUDADES (Prioritarias)")
+    mis_archivos = st.file_uploader("Sube TU captura aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
+    if mis_archivos:
+        st.session_state["mis_ciudades"].update(procesar_tabla_inteligente(mis_archivos))
+    
+    if st.session_state["mis_ciudades"]:
+        lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
+        st.dataframe(lista_mia, use_container_width=True)
+
+with col_der:
+    st.subheader("👥 2. CIUDADES DE MIS AMIGOS")
+    archivos_amigos = st.file_uploader("Sube las de tus AMIGOS aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ami_up")
+    if archivos_amigos:
+        st.session_state["ciudades_amigos"].update(procesar_tabla_inteligente(archivos_amigos))
+    
+    if st.session_state["ciudades_amigos"]:
+        lista_amigos = sorted(list(st.session_state["ciudades_amigos"].values()), key=lambda x: x["ID"])
+        st.dataframe(lista_amigos, use_container_width=True)
+
+st.markdown("---")
+
+# --- PROCESADOR TÁCTICO DE RUTAS ---
+st.subheader("🎯 Panel de Rutas Óptimas")
+
+mis_ciudades_lista = list(st.session_state["mis_ciudades"].values())
+amigos_ciudades_lista = list(st.session_state["ciudades_amigos"].values())
+
+if mis_ciudades_lista and amigos_ciudades_lista:
+    rutas_creadas = 0
+    
+    for mi_c in sorted(mis_ciudades_lista, key=lambda x: x["ID"]):
+        opciones_validas = []
+        for ca in amigos_ciudades_lista:
+            dif_pob = abs(int(mi_c["Población"]) - int(ca["Población"]))
+            dif_edi = abs(int(mi_c["Edificios"]) - int(ca["Edificios"]))
+            
+            if dif_pob <= max_pob and dif_edi <= max_edi:
+                opciones_validas.append({
+                    "ID Amigo": int(ca["ID"]),
+                    "Nombre Amigo": str(ca["Nombre"]),
+                    "Población": int(ca["Población"]),
+                    "Edificios": int(ca["Edificios"]),
+                    "Dif. Población": int(dif_pob),
+                    "Dif. Edificios": int(dif_edi),
+                    "Posición": "📈 Más alta" if ca["Población"] > mi_c["Población"] else "📉 Más baja"
+                })
+        
+        if opciones_validas:
+            rutas_creadas += 1
+            with st.expander(f"🚨 RUTA PARA: {mi_c['Nombre']} [ID {mi_c['ID']}] ({mi_c['Población']} Pob | {mi_c['Edificios']} Edif)"):
+                st.write("Ciudades de tus amigos compatibles:")
+                st.table(opciones_validas)
+                
+    if rutas_creadas == 0:
+        st.info("No hay ciudades que coincidan con los rangos seleccionados.")
+else:
+    st.info("Sube capturas en ambos cuadros para calcular las rutas óptimas.")
+
+
+
