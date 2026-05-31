@@ -52,7 +52,7 @@ def procesar_tabla_definitiva(archivos_subidos):
                     filas[y_base].append((bbox, texto))
                     encontrado = True
                     break
-            if not encontrado: # <--- ¡Corregido aquí con minúscula!
+            if not encontrado: # <--- ¡Corregido por completo aquí!
                 filas[y_centro] = [(bbox, texto)]
         
         # 2. Procesar cada fila analizando las posiciones geográficas en la pantalla
@@ -129,4 +129,38 @@ def procesar_tabla_definitiva(archivos_subidos):
 col_izq, col_der = st.columns(2)
 
 with col_izq:
-    st.subheader("👤 1. MIS CIUD
+    st.subheader("👤 1. MIS CIUDADES (Prioritarias)")
+    mis_archivos = st.file_uploader("Sube TU captura aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
+    if mis_archivos:
+        st.session_state["mis_ciudades"].update(procesar_tabla_definitiva(mis_archivos))
+    
+    if st.session_state["mis_ciudades"]:
+        lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
+        st.dataframe(lista_mia, use_container_width=True)
+
+with col_der:
+    st.subheader("👥 2. CIUDADES DE MIS AMIGOS")
+    archivos_amigos = st.file_uploader("Sube las de tus AMIGOS aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ami_up")
+    if archivos_amigos:
+        st.session_state["ciudades_amigos"].update(procesar_tabla_definitiva(archivos_amigos))
+    
+    if st.session_state["ciudades_amigos"]:
+        lista_amigos = sorted(list(st.session_state["ciudades_amigos"].values()), key=lambda x: x["ID"])
+        st.dataframe(lista_amigos, use_container_width=True)
+
+st.markdown("---")
+
+# --- PROCESADOR TÁCTICO DE RUTAS ---
+st.subheader("🎯 Panel de Rutas Óptimas")
+
+mis_ciudades_lista = list(st.session_state["mis_ciudades"].values())
+amigos_ciudades_lista = list(st.session_state["ciudades_amigos"].values())
+
+if mis_ciudades_lista and amigos_ciudades_lista:
+    rutas_creadas = 0
+    
+    for mi_c in sorted(mis_ciudades_lista, key=lambda x: x["ID"]):
+        opciones_validas = []
+        for ca in amigos_ciudades_lista:
+            dif_pob = abs(mi_c["Población"] - ca["Población"])
+            dif_edi = abs(
