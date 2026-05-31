@@ -4,7 +4,7 @@ import numpy as np
 import easyocr
 
 st.set_page_config(layout="wide")
-st.title("⚔️ Extractor Directo y Final")
+st.title("⚔️ Extractor de Rejilla Estricta")
 
 @st.cache_resource
 def load_ocr():
@@ -12,57 +12,31 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_fila_final(lista_texto):
-    # Intentamos extraer números de la lista
-    numeros = []
-    nombre = ""
-    
-    for item in lista_texto:
-        # Limpiar texto: quitar puntos de millar
-        clean = str(item).replace(".", "").replace(",", "").strip()
-        if clean.isdigit():
-            numeros.append(int(clean))
-        elif len(clean) > 3:
-            nombre = clean
-            
-    # Asignación lógica basada en la estructura de tu imagen:
-    # Si tenemos al menos 3 números: [ID, Población, Edificios]
-    if len(numeros) >= 3:
-        return {"ID": numeros[0], "Nombre": nombre, "Población": numeros[1], "Edificios": numeros[2]}
-    # Si detecta ID y Población, pero no edificios, ponemos 0
-    elif len(numeros) == 2:
-        return {"ID": numeros[0], "Nombre": nombre, "Población": numeros[1], "Edificios": 0}
-    return None
-
-def procesar_imagen(archivo):
+def procesar_imagen_rejilla(archivo):
     file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
+    # Aumentamos el detalle de detección
     results = reader.readtext(img)
     
-    # Agrupar elementos por altura (Y)
-    filas = {}
+    # Definimos zonas X aproximadas según tu imagen (ajustables)
+    # Col 1: ID, Col 2: Nombre, Col 3: Población, Col 4: Edificios
+    columnas = { "ID": [], "Nombre": [], "Pob": [], "Edif": [] }
+    
     for (bbox, text, prob) in results:
-        y = int(bbox[0][1])
-        encontrado = False
-        for y_base in filas:
-            if abs(y_base - y) < 30:
-                filas[y_base].append(text)
-                encontrado = True
-                break
-        if not encontrado:
-            filas[y] = [text]
-            
-    data = []
-    for y in filas:
-        resultado = procesar_fila_final(filas[y])
-        if resultado and resultado["ID"] > 0:
-            data.append(resultado)
-    return data
+        x = bbox[0][0]
+        # Clasificamos según la coordenada X (basado en el ancho total de 1222.png)
+        # Estos valores son una estimación de la posición horizontal
+        if x < 100: columnas["ID"].append(text)
+        elif 100 <= x < 350: columnas["Nombre"].append(text)
+        elif 350 <= x < 650: columnas["Pob"].append(text)
+        elif x >= 650: columnas["Edif"].append(text)
+        
+    return columnas
 
 # UI
-files = st.file_uploader("Sube tus capturas", accept_multiple_files=True)
+files = st.file_uploader("Sube capturas", accept_multiple_files=True)
 if files:
-    todos_datos = []
     for f in files:
-        todos_datos.extend(procesar_imagen(f))
-    st.table(todos_datos)
+        cols = procesar_imagen_rejilla(f)
+        st.write("Datos detectados por columna (puedes verificar si los datos coinciden):")
+        st.json(cols)
