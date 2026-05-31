@@ -122,31 +122,4 @@ mis_ciudades_lista = list(st.session_state["mis_ciudades"].values())
 amigos_ciudades_lista = list(st.session_state["ciudades_amigos"].values())
 
 if mis_ciudades_lista and amigos_ciudades_lista:
-    rutas_creadas = 0
-    
-    for mi_c in sorted(mis_ciudades_lista, key=lambda x: x["ID"]):
-        opciones_validas = []
-        for ca in amigos_ciudades_lista:
-            dif_pob = abs(mi_c["Población"] - ca["Población"])
-            dif_edi = abs(mi_c["Edificios"] - ca["Edificios"])
-            
-            if dif_pob <= max_pob and dif_edi <= max_edi:
-                opciones_validas.append({
-                    "ID Amigo": ca["ID"],
-                    "Población": f"{ca['Población']:,}",
-                    "Edificios": ca["Edificios"],
-                    "Dif. Población": f"{dif_pob Freem:,}".replace(' Freem', ''),
-                    "Dif. Edificios": dif_edi,
-                    "Posición": "📈 Más alta" if ca["Población"] > mi_c["Población"] else "📉 Más baja"
-                })
-        
-        if opciones_validas:
-            rutas_creadas += 1
-            with st.expander(f"🚨 RUTA PARA TU CIUDAD ID {mi_c['ID']} ({mi_c['Población']:,} Pob | {mi_c['Edificios']} Edif)"):
-                st.write("Ciudades de tus amigos que entran en el rango:")
-                st.table(opciones_validas)
-                
-    if rutas_creadas == 0:
-        st.info("No se encontraron ciudades de amigos que cumplan con los rangos máximos para tus ciudades.")
-else:
-    st.info("Sube imágenes en ambos cuadros para calcular las rutas.")
+    rutas
