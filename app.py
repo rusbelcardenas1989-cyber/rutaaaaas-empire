@@ -3,8 +3,9 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor de Edificios", layout="wide")
-st.title("⚔️ Extractor con Detección Robusta")
+# Configuración inicial
+st.set_page_config(page_title="Extractor de Ciudades", layout="wide")
+st.title("⚔️ Panel de Control - Extractor Posicional")
 
 @st.cache_resource
 def load_ocr():
@@ -12,63 +13,64 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_fila_mejorada(bloques):
-    # Ordenar bloques por X
+def extraer_datos_fila(bloques):
+    # Ordenar bloques de izquierda a derecha según su posición X
     bloques.sort(key=lambda x: x[0][0][0])
     
     numeros = []
     nombres = []
     
     for _, texto in bloques:
-        # Limpieza más agresiva para detectar el número
-        t = str(texto).replace(".", "").replace(",", "").strip()
-        if t.isdigit():
-            numeros.append((int(t), _[0][0])) # Guardamos el número y su X
-        elif len(t) > 2:
-            nombres.append(t)
+        # Limpiamos caracteres no numéricos excepto los que forman parte del número (sin puntos)
+        t_clean = str(texto).replace(".", "").replace(",", "").strip()
+        if t_clean.isdigit():
+            numeros.append(int(t_clean))
+        elif len(t_clean) > 2:
+            nombres.append(t_clean)
             
+    # Asignación por posición literal
+    # Posición 0: ID, Posición 1: Población, Posición 2: Edificios
     datos = {"ID": 0, "Nombre": " ".join(nombres), "Población": 0, "Edificios": 0}
     
-    if len(numeros) >= 1: 
-        datos["ID"] = numeros[0][0]
+    if len(numeros) >= 1: datos["ID"] = numeros[0]
+    if len(numeros) >= 2: datos["Población"] = numeros[1]
+    if len(numeros) >= 3: datos["Edificios"] = numeros[2]
     
-    # Lógica de asignación por valor y posición
-    for val, x in numeros[1:]:
-        if 1000 <= val <= 99999:
-            datos["Población"] = val
-        elif 1 <= val <= 330:
-            datos["Edificios"] = val
-            
     return datos
 
 def procesar_imagen(archivo):
     file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    res_ocr = reader.readtext(img)
+    resultados = reader.readtext(img)
     
+    # Agrupar elementos por cercanía vertical (filas)
     filas = {}
-    for r in res_ocr:
+    for r in resultados:
         y = int((r[0][0][1] + r[0][2][1]) / 2)
         agrupado = False
         for y_base in filas:
-            if abs(y_base - y) < 25:
+            if abs(y_base - y) < 20:
                 filas[y_base].append((r[0], r[1]))
                 agrupado = True
                 break
         if not agrupado: filas[y] = [(r[0], r[1])]
             
-    ciudades = {}
+    lista_ciudades = []
     for y in filas:
+        # Ignorar encabezados
         if any("id" in str(b[1]).lower() for b in filas[y]): continue
-        c = procesar_fila_mejorada(filas[y])
-        if 0 < c["ID"] < 1000: ciudades[c["ID"]] = c
-    return ciudades
+        
+        c = extraer_datos_fila(filas[y])
+        if 0 < c["ID"] < 1000:
+            lista_ciudades.append(c)
+            
+    return lista_ciudades
 
-# Interfaz
-col1, col2 = st.columns(2)
-with col1:
-    files = st.file_uploader("Sube capturas", accept_multiple_files=True)
-    if files:
-        data = {}
-        for f in files: data.update(procesar_imagen(f))
-        st.dataframe(sorted(list(data.values()), key=lambda x: x["ID"]))
+# UI
+st.subheader("Subir Capturas")
+files = st.file_uploader("Sube tus imágenes", accept_multiple_files=True)
+if files:
+    data_final = []
+    for f in files:
+        data_final.extend(procesar_imagen(f))
+    st.dataframe(sorted(data_final, key=lambda x: x["ID"]))
