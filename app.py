@@ -64,4 +64,36 @@ def procesar_tabla_inteligente(archivos_subidos):
             
             for bbox, texto in bloques:
                 texto_limpio = texto.strip()
-                if not texto_limpio or any(w in texto_limpio.lower() for
+                if not texto_limpio or any(w in texto_limpio.lower() for w in ["id", "nombre", "pob", "edi", "regi", "ciudad"]):
+                    continue
+                
+                # Extraer solo dígitos numéricos puros
+                solo_num = "".join([c for c in texto_limpio if c.isdigit()])
+                
+                # CORRECCIÓN DE LA LÍNEA 67: Forzar la coordenada X a entero de forma segura
+                try:
+                    x_inicio = int(bbox[0][0])
+                except (IndexError, TypeError, ValueError):
+                    x_inicio = 0
+                
+                if solo_num.isdigit() and len(solo_num) > 0:
+                    val_num = int(solo_num)
+                    numeros_fila.append((x_inicio, val_num))
+                else:
+                    # Si contiene letras, asumimos que es parte del Nombre
+                    if len(texto_limpio) > 1:
+                        nombre_detectado.append(texto_limpio)
+            
+            if numeros_fila:
+                # El ID siempre es el número que está más a la izquierda de la fila
+                numeros_ordenados_por_x = sorted(numeros_fila, key=lambda x: x[0])
+                id_detectado = numeros_ordenados_por_x[0][1]
+                
+                # Descartamos el ID para analizar el resto de números (Población y Edificios)
+                otros_numeros = [n[1] for n in numeros_ordenados_por_x[1:]]
+                
+                poblacion = 0
+                edificios = 0
+                
+                for num in otros_numeros:
+                    # Filtro calibr
