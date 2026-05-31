@@ -3,132 +3,176 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Optimizador Alianza", layout="wide")
+# 1. Configuración de la interfaz de la página
+st.set_page_config(page_title="Optimizador de Ciudades Pro", layout="wide")
 
-st.title("⚔️ Optimizador de Ciudades - Base de Datos Compartida")
-st.write("¡Sube tus capturas y las de tus amigos! La app sumará todas las ciudades y calculará las mejores opciones cruzadas.")
+st.title("⚔️ Panel de Control y Emparejamiento de Ciudades")
+st.write("Sube tus capturas (puedes subir varias a la vez). La app extraerá los datos y ordenará las mejores opciones por ciudad.")
 
-# --- BASE DE DATOS COMPARTIDA EN MEMORIA ---
-# Creamos una lista global que no se borra cuando otra persona entra a la web
+# 2. Base de datos global en memoria (Almacena los datos de todos los usuarios)
 if "base_ciudades" not in st.session_state:
     st.session_state["base_ciudades"] = {}
 
-# --- MENÚ LATERAL DE AJUSTES ---
-st.sidebar.header("⚙️ Límites Máximos")
+# 3. Menú lateral con controles de rangos máximos
+st.sidebar.header("⚙️ Ajuste de Rangos Máximos")
+st.sidebar.write("Define los límites máximos de diferencia permitidos (hacia arriba o hacia abajo):")
+
 max_pob = st.sidebar.slider("Diferencia Máxima de Población", min_value=100, max_value=10000, value=4999, step=1)
 max_edi = st.sidebar.slider("Diferencia Máxima de Edificios", min_value=1, max_value=50, value=20, step=1)
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🧹 Borrar toda la Base de Datos", help="Limpia todas las ciudades guardadas para empezar de cero"):
+if st.sidebar.button("🧹 Limpiar Base de Datos", help="Borra todas las ciudades para cargar capturas nuevas"):
     st.session_state["base_ciudades"] = {}
+    st.success("¡Base de datos vaciada!")
     st.rerun()
 
-# Inicializar IA de lectura
+# 4. Inicialización del motor de Inteligencia Artificial (OCR)
 @st.cache_resource
 def load_ocr():
+    # Detecta texto e idioma estándar
     return easyocr.Reader(['es', 'en'], gpu=False)
 
 reader = load_ocr()
 
-# --- SUBIDA DE IMÁGENES ---
-# Permitimos subir múltiples archivos a la vez utilizando accept_multiple_files=True
-uploaded_files = st.file_uploader("Sube una o varias capturas de pantalla de las tablas...", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+# 5. Zona de subida de archivos (Soporta múltiples imágenes arrastradas juntas)
+uploaded_files = st.file_uploader(
+    "Arrastra o selecciona una o varias capturas de pantalla de tus tablas...", 
+    type=["png", "jpg", "jpeg"], 
+    accept_multiple_files=True
+)
 
+# 6. Procesamiento de las imágenes cargadas
 if uploaded_files:
-    ciudades_nuevas_detectadas = 0
-    
-    for uploaded_file in uploaded_files:
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, 1)
-        
-        # Ejecutar lectura de IA
-        resultados_ocr = reader.readtext(image)
-        
-        # Agrupar por filas (altura Y)
-        lineas = {}
-        for (bbox, texto, prob) in resultados_ocr:
-            y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
-            encontrado = False
-            for y_base in lineas.keys():
-                if abs(y_base - y_centro) < 15:
-                    lineas[y_base].append((bbox[0][0], texto))
-                    encontrado = True
-                    break
-            if not encontrado:
-                lineas[y_centro] = [(bbox[0][0], texto)]
+    with st.spinner("La IA está leyendo y organizando los datos de las imágenes..."):
+        for uploaded_file in uploaded_files:
+            file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+            image = cv2.imdecode(file_bytes, 1)
+            
+            # Ejecutar la lectura de texto de EasyOCR
+            resultados_ocr = reader.readtext(image)
+            
+            # Agrupar lecturas por su altura (eje Y) para reconstruir las filas reales
+            lineas = {}
+            for (bbox, texto, prob) in resultados_ocr:
+                y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
+                encontrado = False
+                for y_base in lineas.keys():
+                    if abs(y_base - y_centro) < 16:  # Margen de píxeles para pertenecer a la misma fila
+                        lineas[y_base].append((bbox[0][0], texto)) # Guardamos posición X y texto
+                        encontrado = True
+                        break
+                if not encontrado:
+                    lineas[y_centro] = [(bbox[0][0], texto)]
 
-            # Procesar filas y extraer números
+            # Extraer y mapear de forma ordenada: ID -> Nombre -> Población -> Edificios
             for y_coord in sorted(lineas.keys()):
+                # Ordenar los bloques de la fila de izquierda a derecha usando el eje X
                 bloques_ordenados = sorted(lineas[y_coord], key=lambda x: x[0])
-                bloques_texto = [b[1] for b in bloques_ordenados]
+                textos_fila = [b[1] for b in bloques_ordenados]
                 
-                numeros = []
-                for t in bloques_texto:
+                # Filtrar solo los elementos que son números puros
+                numeros_fila = []
+                for t in textos_fila:
                     limpio = t.replace('.', '').replace(',', '').replace(' ', '').strip()
                     if limpio.isdigit():
-                        numeros.append(int(limpio))
+                        numeros_fila.append(int(limpio))
                 
-                # Si detectamos una fila válida (ID, Población, Edificios)
-                if len(numeros) >= 3:
-                    id_ciudad = numeros[0]
-                    # Guardamos (o actualizamos) en la base de datos compartida usando el ID como llave única
+                # Una fila del juego siempre tiene mínimo: ID (primero), Población (medio), Edificios (último)
+                if len(numeros_fila) >= 3:
+                    id_ciudad = numeros_fila[0]
+                    poblacion = numeros_fila[1]
+                    edificios = numeros_fila[-1] # Tomamos siempre la última columna numérica detectada (Edif)
+                    
+                    # Tratar de capturar el nombre (suele estar en la segunda posición de texto)
+                    nombre_ciudad = "Desconocido"
+                    if len(textos_fila) > 1:
+                        # Si el segundo bloque no es número, asumimos que es el nombre
+                        if not textos_fila[1].replace('.', '').strip().isdigit():
+                            nombre_ciudad = textos_fila[1].strip()
+                    
+                    # Insertar o actualizar en la base de datos compartida usando el ID como clave única
                     st.session_state["base_ciudades"][id_ciudad] = {
-                        "id": id_ciudad,
-                        "poblacion": numeros[1],
-                        "edificios": numeros[-1]
+                        "ID": id_ciudad,
+                        "Nombre": nombre_ciudad,
+                        "Población": poblacion,
+                        "Edificios": edificios
                     }
-                    ciudades_nuevas_detectadas += 1
 
-    st.success(f"¡Procesamiento completado! Se han cargado/actualizado los datos en la lista común.")
+# 7. Convertir la base de datos compartida en una lista para operar matemáticamente
+lista_maestra = list(st.session_state["base_ciudades"].values())
 
-# --- MOSTRAR BASE DE DATOS TOTAL ---
-lista_total_ciudades = list(st.session_state["base_ciudades"].values())
-
-st.subheader(f"📋 Banco Total de Ciudades Guardadas ({len(lista_total_ciudades)} ciudades en total)")
-if lista_total_ciudades:
-    st.dataframe(lista_total_ciudades)
+# Mostrar la tabla general con todas las ciudades acumuladas
+st.subheader(f"📋 Banco de Ciudades Cargadas ({len(lista_maestra)} en total)")
+if lista_maestra:
+    # Ordenar la tabla visual por ID para que se vea organizada
+    lista_maestra_ordenada = sorted(lista_maestra, key=lambda x: x["ID"])
+    st.dataframe(lista_maestra_ordenada, use_container_width=True)
     
-    # --- ALGORITMO DE EMPAREJAMIENTO DE MEJORES OPCIONES ---
-    st.subheader("🎯 Tus Opciones Óptimas por Ciudad (Cruzando todas las imágenes)")
+    # 8. ALGORITMO: Búsqueda y agrupación de opciones óptimas
+    st.subheader("🎯 Opciones Óptimas Disponibles (Organizadas por Ciudad Origen)")
     
-    opciones_por_ciudad = {c["id"]: [] for c in lista_total_ciudades}
+    # Estructura para almacenar las coincidencias de cada ciudad
+    coincidencias_por_ciudad = {c["ID"]: [] for c in lista_maestra}
     
-    for c1 in lista_total_ciudades:
-        for c2 in lista_total_ciudades:
-            if c1["id"] == c2["id"]:
-                continue
+    # Comparar todas las ciudades contra todas las ciudades de la base de datos
+    for c1 in lista_maestra:
+        for c2 in lista_maestra:
+            if c1["ID"] == c2["ID"]:
+                continue # Evitar compararse consigo misma
             
-            dif_pob = abs(c1["poblacion"] - c2["poblacion"])
-            dif_edi = abs(c1["edificios"] - c2["edificios"])
+            # Calcular las diferencias absolutas (evalúa automáticamente hacia arriba y hacia abajo)
+            dif_pob = abs(c1["Población"] - c2["Población"])
+            dif_edi = abs(c1["Edificios"] - c2["Edificios"])
             
+            # Evaluar si cumple con los rangos máximos establecidos en los sliders laterales
             if dif_pob <= max_pob and dif_edi <= max_edi:
-                opciones_por_ciudad[c1["id"]].append({
-                    "id_opcion": c2["id"],
-                    "poblacion_opcion": c2["poblacion"],
-                    "edificios_opcion": c2["edificios"],
-                    "dif_pob": dif_pob,
-                    "dif_edi": dif_edi,
-                    "score_optimo": dif_pob + (dif_edi * 100)
+                coincidencias_por_ciudad[c1["ID"]].append({
+                    "id_destino": c2["ID"],
+                    "nombre_destino": c2["Nombre"],
+                    "pob_destino": c2["Población"],
+                    "edi_destino": c2["Edificios"],
+                    "dif_poblacion": dif_pob,
+                    "dif_edificios": dif_edi,
+                    # Score para ordenar: menor diferencia total = más arriba en la lista de mejores opciones
+                    "prioridad": dif_pob + (dif_edi * 150) 
                 })
+
+    # 9. Mostrar en la interfaz los bloques desplegables organizados por ciudad
+    ciudades_con_opciones = 0
     
-    # Desplegar los resultados ordenados de mejor a peor
-    for c_id in opciones_por_ciudad.keys():
-        ciudad_actual = next(c for c in lista_total_ciudades if c["id"] == c_id)
-        lista_opciones = sorted(opciones_por_ciudad[c_id], key=lambda x: x["score_optimo"])
+    for c_id in sorted(coincidencias_por_ciudad.keys()):
+        ciudad_origen = next(c for c in lista_maestra if c["ID"] == c_id)
+        opciones_validas = coincidencias_por_ciudad[c_id]
         
-        if lista_opciones:
-            with st.expander(f"🏢 Ciudad ID {c_id} ({ciudad_actual['poblacion']} Pob | {ciudad_actual['edificios']} Edif) ➔ {len(lista_opciones)} opciones óptimas encontradas"):
-                tabla_opciones = []
-                for opc in lista_opciones:
-                    direccion = "📈 Más alta" if opc["poblacion_opcion"] > ciudad_actual["poblacion"] else "📉 Más baja"
-                    tabla_opciones.append({
-                        "ID Opción": opc["id_opcion"],
-                        "Población": opc["poblacion_opcion"],
-                        "Edificios": opc["edificios_opcion"],
-                        "Dif. Población": opc["dif_pob"],
-                        "Dif. Edificios": opc["dif_edi"],
-                        "Posición": direccion
+        # Ordenar las opciones de la ciudad actual desde la más óptima a la menos óptima
+        opciones_ordenadas = sorted(opciones_validas, key=lambda x: x["prioridad"])
+        
+        if opciones_ordenadas:
+            ciudades_con_opciones += 1
+            
+            # Crear pestaña colapsable con el resumen de la ciudad de origen
+            titulo_pestana = f"🏢 ID {c_id} — {ciudad_origen['Nombre']} ({ciudad_origen['Población']} Pob | {ciudad_origen['Edificios']} Edif) ➔ {len(opciones_ordenadas)} opciones óptimas"
+            with st.expander(titulo_pestana):
+                
+                # Crear estructura de tabla limpia para mostrar los rivales/aliados dentro del desplegable
+                tabla_visual = []
+                for opc in opciones_ordenadas:
+                    # Determinar de forma clara si el objetivo está por encima o por debajo en población
+                    relacion = "📈 Más alta (+)" if opc["pob_destino"] > ciudad_origen["Población"] else "📉 Más baja (-)"
+                    
+                    tabla_visual.append({
+                        "ID Opción": opc["id_destino"],
+                        "Nombre": opc["nombre_destino"],
+                        "Población": f"{opc['pob_destino']:,}",
+                        "Edificios": opc["edi_destino"],
+                        "Diferencia Pob.": f"{opc['dif_poblacion']:,}",
+                        "Diferencia Edif.": opc["dif_edificios"],
+                        "Ubicación Relativa": relacion
                     })
-                st.table(tabla_opciones)
+                
+                st.table(tabla_visual)
+                
+    if ciudades_con_opciones == 0:
+        st.warning("Ninguna de las ciudades guardadas tiene opciones válidas dentro de los rangos máximos actuales.")
 else:
-    st.info("La base de datos está vacía. Sube capturas de pantalla para empezar a emparejar.")
+    st.info("El banco de datos está vacío. Sube capturas de pantalla de las tablas para guardar las ciudades y cruzarlas.")
