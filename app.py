@@ -3,8 +3,8 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor Definitivo", layout="wide")
-st.title("⚔️ Extractor Directo (Posicional)")
+st.set_page_config(page_title="Extractor de Edificios", layout="wide")
+st.title("⚔️ Extractor con Detección Robusta")
 
 @st.cache_resource
 def load_ocr():
@@ -12,33 +12,33 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_fila_literal(bloques):
-    # Ordenar bloques por posición X (de izquierda a derecha)
+def procesar_fila_mejorada(bloques):
+    # Ordenar bloques por X
     bloques.sort(key=lambda x: x[0][0][0])
     
     numeros = []
     nombres = []
     
     for _, texto in bloques:
-        # Limpiamos el texto para detectar números (quitamos puntos de miles)
+        # Limpieza más agresiva para detectar el número
         t = str(texto).replace(".", "").replace(",", "").strip()
         if t.isdigit():
-            numeros.append(int(t))
+            numeros.append((int(t), _[0][0])) # Guardamos el número y su X
         elif len(t) > 2:
             nombres.append(t)
             
-    # Asignación POSICIONAL pura:
-    # 0 = ID, 1 = Población, 2 = Edificios
     datos = {"ID": 0, "Nombre": " ".join(nombres), "Población": 0, "Edificios": 0}
     
-    if len(numeros) >= 1: datos["ID"] = numeros[0]
-    if len(numeros) >= 2: datos["Población"] = numeros[1]
-    if len(numeros) >= 3: datos["Edificios"] = numeros[2]
-    # Si solo hay 2 números, asumimos el último es Edificios si es chico
-    elif len(numeros) == 2 and numeros[1] <= 330:
-        datos["Edificios"] = numeros[1]
-        datos["Población"] = 0 
-        
+    if len(numeros) >= 1: 
+        datos["ID"] = numeros[0][0]
+    
+    # Lógica de asignación por valor y posición
+    for val, x in numeros[1:]:
+        if 1000 <= val <= 99999:
+            datos["Población"] = val
+        elif 1 <= val <= 330:
+            datos["Edificios"] = val
+            
     return datos
 
 def procesar_imagen(archivo):
@@ -46,7 +46,6 @@ def procesar_imagen(archivo):
     img = cv2.imdecode(file_bytes, 1)
     res_ocr = reader.readtext(img)
     
-    # Agrupar por filas (coordenada Y)
     filas = {}
     for r in res_ocr:
         y = int((r[0][0][1] + r[0][2][1]) / 2)
@@ -61,7 +60,7 @@ def procesar_imagen(archivo):
     ciudades = {}
     for y in filas:
         if any("id" in str(b[1]).lower() for b in filas[y]): continue
-        c = procesar_fila_literal(filas[y])
+        c = procesar_fila_mejorada(filas[y])
         if 0 < c["ID"] < 1000: ciudades[c["ID"]] = c
     return ciudades
 
