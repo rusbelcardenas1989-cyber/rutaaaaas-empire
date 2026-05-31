@@ -3,101 +3,76 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor Preciso - Juego", layout="wide")
-st.title("🎯 Optimizador Avanzado por Columnas Fijas")
-st.write("Esta versión recorta la imagen en columnas verticales para que la IA no confunda Población con Edificios.")
+st.set_page_config(page_title="Optimizador de Ciudades", layout="wide")
 
+st.title("⚔️ Optimizador de Emparejamientos para el Juego")
+st.write("Sube tu captura. El sistema buscará ciudades con diferencias hacia arriba o hacia abajo según los límites.")
+
+# --- MENÚ LATERAL DE CONFIGURACIÓN ---
+st.sidebar.header("⚙️ Configuración de Límites")
+st.sidebar.write("Define las diferencias máximas permitidas (hacia arriba o hacia abajo):")
+
+# Configuración de los máximos solicitados por el usuario
+max_pob = st.sidebar.slider("Diferencia Máxima de Población", min_value=100, max_value=10000, value=4999, step=1)
+max_edi = st.sidebar.slider("Diferencia Máxima de Edificios", min_value=1, max_value=50, value=20, step=1)
+
+# Inicializar el motor de IA
 @st.cache_resource
 def load_ocr():
-    # Usamos el modo "allowlist" en el lector para forzarlo a leer solo números
     return easyocr.Reader(['es', 'en'], gpu=False)
 
 reader = load_ocr()
 
-uploaded_file = st.file_uploader("Sube la captura de pantalla de la tabla...", type=["png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("Arrastra aquí la captura de pantalla de la tabla...", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img_original = cv2.imdecode(file_bytes, 1)
+    image = cv2.imdecode(file_bytes, 1)
     
-    # Dimensiones de la imagen
-    alto, ancho, _ = img_original.shape
+    st.image(image, caption="Tabla cargada para analizar", use_container_width=True)
     
-    # --- RECORTE POR COLUMNAS (Ajustado a la estructura de tu tabla) ---
-    # Definimos qué porcentaje del ancho de la imagen corresponde a cada dato
-    # ID: primer 15% | Población: del 48% al 60% | Edificios: del 90% al 100%
-    col_id = img_original[:, 0:int(ancho * 0.15)]
-    col_pob = img_original[:, int(ancho * 0.48):int(ancho * 0.60)]
-    col_edi = img_original[:, int(ancho * 0.90):ancho]
-    
-    # Mostrar visualmente las columnas recortadas para control del usuario
-    st.subheader("🔍 Así es como la IA ve tus columnas por separado:")
-    c_visual1, c_visual2, c_visual3 = st.columns(3)
-    with c_visual1: st.image(col_id, caption="Columna ID", use_container_width=True)
-    with c_visual2: st.image(col_pob, caption="Columna Población", use_container_width=True)
-    with c_visual3: st.image(col_edi, caption="Columna Edificios", use_container_width=True)
-    
-    with st.spinner("Procesando columnas numéricas de forma independiente..."):
-        # Forzamos al OCR a buscar SOLO números para evitar confusiones con letras
-        res_id = reader.readtext(col_id, allowlist='0123456789')
-        res_pob = reader.readtext(col_pob, allowlist='0123456789., ')
-        res_edi = reader.readtext(col_edi, allowlist='0123456789')
+    with st.spinner("La IA está leyendo las columnas de la tabla..."):
+        resultados_ocr = reader.readtext(image)
         
-        # Función para agrupar las lecturas por su altura (Y) en la pantalla
-        def extraer_por_filas(resultados_ocr):
-            datos_filas = {}
-            for (bbox, texto, prob) in resultados_ocr:
-                y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
-                limpio = texto.replace('.', '').replace(',', '').replace(' ', '').strip()
-                if limpio.isdigit():
-                    # Agrupar si están en un rango de 15 píxeles de altura
-                    agrupado = False
-                    for y_base in datos_filas.keys():
-                        if abs(y_base - y_centro) < 15:
-                            datos_filas[y_base] = int(limpio)
-                            agrupado = True
-                            break
-                    if not agrupado:
-                        datos_filas[y_centro] = int(limpio)
-            return datos_filas
+        # Agrupar las lecturas por filas (coordenada Y de la pantalla)
+        lineas = {}
+        for (bbox, texto, prob) in resultados_ocr:
+            y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
+            encontrado = False
+            for y_base in lineas.keys():
+                if abs(y_base - y_centro) < 15:
+                    lineas[y_base].append((bbox[0][0], texto))
+                    encontrado = True
+                    break
+            if not encontrado:
+                lineas[y_centro] = [(bbox[0][0], texto)]
 
-        ids_por_fila = extraer_por_filas(res_id)
-        pob_por_fila = extraer_por_filas(res_pob)
-        edi_por_fila = extraer_por_filas(res_edi)
-        
-        # Alinear los datos de las tres columnas usando la posición vertical (Y)
         ciudades_procesadas = []
-        for y_id, id_val in ids_por_fila.items():
-            pob_val = None
-            edi_val = None
+        for y_coord in sorted(lineas.keys()):
+            bloques_ordenados = sorted(lineas[y_coord], key=lambda x: x[0])
+            bloques_texto = [b[1] for b in bloques_ordenados]
             
-            # Buscar la población más cercana en altura (Y)
-            for y_pob, p_val in pob_por_fila.items():
-                if abs(y_id - y_pob) < 18:
-                    pob_val = p_val
-                    break
-                    
-            # Buscar los edificios más cercanos en altura (Y)
-            for y_edi, e_val in edi_por_fila.items():
-                if abs(y_id - y_edi) < 18:
-                    edi_val = e_val
-                    break
+            numeros = []
+            for t in bloques_texto:
+                limpio = t.replace('.', '').replace(',', '').replace(' ', '').strip()
+                if limpio.isdigit():
+                    numeros.append(int(limpio))
             
-            # Solo guardamos si pudimos rescatar los tres datos de la fila
-            if pob_val is not None and edi_val is not None:
+            # Identificar ID, Población (columna central) y Edificios (última columna)
+            if len(numeros) >= 3:
                 ciudades_procesadas.append({
-                    "id": id_val,
-                    "poblacion": pob_val,
-                    "edificios": edi_val
+                    "id": numeros[0],
+                    "poblacion": numeros[1],
+                    "edificios": numeros[-1]
                 })
 
-    # --- MOSTRAR RESULTADOS ---
-    st.subheader("📋 Tabla Alineada Correctamente")
+    st.subheader("📋 Datos reconocidos por la IA")
     if ciudades_procesadas:
         st.dataframe(ciudades_procesadas)
         
-        st.subheader("🎯 Parejas Óptimas Encontradas")
-        parejas = []
+        # --- ALGORITMO DE EMPAREJAMIENTO (MÁXIMOS HACIA ARRIBA Y ABAJO) ---
+        st.subheader("🎯 Parejas Encontradas dentro del Rango")
+        parejas_validas = []
         n = len(ciudades_procesadas)
         
         for i in range(n):
@@ -105,23 +80,34 @@ if uploaded_file is not None:
                 c1 = ciudades_procesadas[i]
                 c2 = ciudades_procesadas[j]
                 
+                # Al usar abs(), medimos la diferencia sin importar quién esté arriba o abajo
                 dif_pob = abs(c1["poblacion"] - c2["poblacion"])
                 dif_edi = abs(c1["edificios"] - c2["edificios"])
                 
-                # Tu condición estricta
-                if dif_pob == 4999 and dif_edi == 20:
-                    parejas.append((c1, c2))
+                # Condición: que no superen los máximos definidos en la barra lateral
+                if dif_pob <= max_pob and dif_edi <= max_edi:
+                    parejas_validas.append((c1, c2, dif_pob, dif_edi))
 
-        if parejas:
-            for c1, c2 in parejas:
-                st.success(f"¡Combinación perfecta encontrada!")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric(label=f"Ciudad ID {c1['id']}", value=f"{c1['edificios']} Edificios", delta=f"{c1['poblacion']} Población")
-                with col2:
-                    st.metric(label=f"Ciudad ID {c2['id']}", value=f"{c2['edificios']} Edificios", delta=f"{c2['poblacion']} Población")
-                st.write("---")
+        if parejas_validas:
+            st.info(f"Se encontraron {len(parejas_validas)} combinaciones que se llevan como máximo {max_pob} pob. y {max_edi} edif.")
+            
+            for c1, c2, dp, de in parejas_validas:
+                # Determinar cuál está arriba y cuál abajo para mostrárselo claro al usuario
+                if c1["poblacion"] >= c2["poblacion"]:
+                    superior, inferior = c1, c2
+                else:
+                    superior, inferior = c2, c1
+                
+                with st.expander(f"➔ Pareja: ID {superior['id']} e ID {inferior['id']}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Ciudad Más Alta (ID {superior['id']}):**")
+                        st.write(f"📈 {superior['poblacion']} Población | 🏛️ {superior['edificios']} Edificios")
+                    with col2:
+                        st.markdown(f"**Ciudad Más Baja (ID {inferior['id']}):**")
+                        st.write(f"📉 {inferior['poblacion']} Población | 🏛️ {inferior['edificios']} Edificios")
+                    st.caption(f"Diferencias netas actuales: Diferencia Población = {dp} | Diferencia Edificios = {de}")
         else:
-            st.info("No se encontraron ciudades con la diferencia exacta (20 edif. y 4999 pob.) en esta imagen.")
+            st.warning("No se hallaron ciudades que cumplan con los rangos establecidos en esta imagen.")
     else:
-        st.error("No se detectaron filas completas. Asegúrate de que la captura muestre la tabla completa de borde a borde.")
+        st.error("No se pudieron extraer datos numéricos. Asegúrate de que la tabla sea legible.")
