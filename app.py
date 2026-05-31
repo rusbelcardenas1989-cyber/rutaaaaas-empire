@@ -4,7 +4,7 @@ import numpy as np
 import easyocr
 
 st.set_page_config(layout="wide")
-st.title("⚔️ Extractor Universal (Sin Filtros)")
+st.title("⚔️ Extractor Directo y Final")
 
 @st.cache_resource
 def load_ocr():
@@ -12,36 +12,57 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_imagen_simple(archivo):
+def procesar_fila_final(lista_texto):
+    # Intentamos extraer números de la lista
+    numeros = []
+    nombre = ""
+    
+    for item in lista_texto:
+        # Limpiar texto: quitar puntos de millar
+        clean = str(item).replace(".", "").replace(",", "").strip()
+        if clean.isdigit():
+            numeros.append(int(clean))
+        elif len(clean) > 3:
+            nombre = clean
+            
+    # Asignación lógica basada en la estructura de tu imagen:
+    # Si tenemos al menos 3 números: [ID, Población, Edificios]
+    if len(numeros) >= 3:
+        return {"ID": numeros[0], "Nombre": nombre, "Población": numeros[1], "Edificios": numeros[2]}
+    # Si detecta ID y Población, pero no edificios, ponemos 0
+    elif len(numeros) == 2:
+        return {"ID": numeros[0], "Nombre": nombre, "Población": numeros[1], "Edificios": 0}
+    return None
+
+def procesar_imagen(archivo):
     file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     results = reader.readtext(img)
     
-    # Agrupamos por altura (Y) con mucha tolerancia (40 píxeles)
+    # Agrupar elementos por altura (Y)
     filas = {}
     for (bbox, text, prob) in results:
         y = int(bbox[0][1])
         encontrado = False
         for y_base in filas:
-            if abs(y_base - y) < 40:
+            if abs(y_base - y) < 30:
                 filas[y_base].append(text)
                 encontrado = True
                 break
         if not encontrado:
             filas[y] = [text]
             
-    # Convertimos a formato tabla
     data = []
     for y in filas:
-        row = filas[y]
-        # Solo filas que tengan números
-        if len(row) >= 3:
-            data.append({"Fila": row})
+        resultado = procesar_fila_final(filas[y])
+        if resultado and resultado["ID"] > 0:
+            data.append(resultado)
     return data
 
-files = st.file_uploader("Sube capturas", accept_multiple_files=True)
+# UI
+files = st.file_uploader("Sube tus capturas", accept_multiple_files=True)
 if files:
+    todos_datos = []
     for f in files:
-        st.write(f"Resultados para {f.name}:")
-        datos = procesar_imagen_simple(f)
-        st.write(datos)
+        todos_datos.extend(procesar_imagen(f))
+    st.table(todos_datos)
