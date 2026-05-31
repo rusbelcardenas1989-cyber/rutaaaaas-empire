@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor de Rutas - Modo Definitivo", layout="wide")
+st.set_page_config(page_title="Extractor de Rutas - Precisión Real", layout="wide")
 
-st.title("⚔️ Panel de Control - Extractor Inteligente")
-st.write("Sube tus capturas en los cuadros de abajo. Sistema de orden posicional sin pérdida de datos.")
+st.title("⚔️ Panel de Control - Extractor de Alta Precisión")
+st.write("Sube tus capturas. Sistema optimizado para forzar la lectura de Edificios reales mediante escaneo enfocado.")
 
 # Almacenamiento en memoria
 if "mis_ciudades" not in st.session_state:
@@ -37,6 +37,7 @@ def procesar_tabla_inteligente(archivos_subidos):
     for archivo in archivos_subidos:
         file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, 1)
+        h_img, w_img, _ = img.shape
         
         # Escaneo general inicial
         resultados_ocr = reader.readtext(img)
@@ -62,6 +63,11 @@ def procesar_tabla_inteligente(archivos_subidos):
             nombre_detectado = []
             numeros_fila = []
             
+            # Guardamos límites de la fila para escaneos de rescate
+            y_min = max(0, y_coord - 20)
+            y_max = min(h_img, y_coord + 20)
+            x_poblacion_fin = 0
+            
             for bbox, texto in bloques:
                 texto_limpio = texto.strip()
                 if not texto_limpio or any(w in texto_limpio.lower() for w in ["id", "nombre", "pob", "edi", "regi", "ciudad"]):
@@ -72,41 +78,58 @@ def procesar_tabla_inteligente(archivos_subidos):
                 
                 try:
                     x_inicio = int(bbox[0][0])
+                    x_fin = int(bbox[1][0])
                 except (IndexError, TypeError, ValueError):
                     x_inicio = 0
+                    x_fin = 0
                 
                 if solo_num.isdigit() and len(solo_num) > 0:
                     val_num = int(solo_num)
                     numeros_fila.append((x_inicio, val_num))
+                    if val_num >= 1000:
+                        x_poblacion_fin = x_fin
                 else:
-                    # Si contiene letras, asumimos que es parte del Nombre
                     if len(texto_limpio) > 1:
                         nombre_detectado.append(texto_limpio)
             
             if numeros_fila:
-                # Ordenar todos los números de izquierda a derecha según su posición X en la pantalla
+                # Ordenar todos los números encontrados de izquierda a derecha
                 numeros_ordenados = sorted(numeros_fila, key=lambda x: x[0])
                 
-                # El primero de la izquierda es el ID sin excepción
+                # El primero siempre es el ID
                 id_detectado = int(numeros_ordenados[0][1])
                 
                 poblacion = 0
                 edificios = 0
                 
-                # Analizar el resto de números encontrados en la fila
                 restantes = numeros_ordenados[1:]
                 
                 if len(restantes) == 1:
                     val = int(restantes[0][1])
                     if val >= 1000:
                         poblacion = val
-                        edificios = 115  # Rescate automático: Valor promedio estimado para que no quede en 0
                     else:
                         edificios = val
                 elif len(restantes) >= 2:
-                    # Si lee ambos, asignación directa por columnas físicas (Columna 3 vs Columna 4)
                     poblacion = int(restantes[0][1])
                     edificios = int(restantes[1][1])
+                
+                # 🛠️ ESCANEO ENFOCADO DE RESCATE PARA EDIFICIOS REALES 🛠️
+                # Si detectamos población pero los edificios quedaron en 0, obligamos al OCR a mirar la esquina derecha
+                if poblacion >= 1000 and edificios == 0:
+                    x_start = x_poblacion_fin if x_poblacion_fin > 0 else int(w_img * 0.75)
+                    # Cortamos la zona exacta donde deberían estar los edificios en esa fila
+                    zona_edificios = img[y_min:y_max, x_start:w_img]
+                    
+                    # Forzamos un escaneo ultra enfocado usando solo caracteres numéricos
+                    res_rescate = reader.readtext(zona_edificios, allowlist='0123456789')
+                    for (_, txt_r, _) in res_rescate:
+                        txt_r_limpio = "".join([c for c in txt_r.strip() if c.isdigit()])
+                        if txt_r_limpio.isdigit():
+                            val_r = int(txt_r_limpio)
+                            if 10 <= val_r <= 330:
+                                edificios = val_r
+                                break
                 
                 # Validar ID de ciudad correcto
                 if id_detectado is not None and id_detectado < 1000:
