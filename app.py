@@ -3,14 +3,12 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor de Rutas - Modo Posicional", layout="wide")
+st.set_page_config(page_title="Extractor Definitivo", layout="wide")
 
-st.title("⚔️ Panel de Control - Extractor Estricto")
+st.title("⚔️ Panel de Control - Extractor a Prueba de Errores")
 
-if "mis_ciudades" not in st.session_state:
-    st.session_state["mis_ciudades"] = {}
-if "ciudades_amigos" not in st.session_state:
-    st.session_state["ciudades_amigos"] = {}
+if "mis_ciudades" not in st.session_state: st.session_state["mis_ciudades"] = {}
+if "ciudades_amigos" not in st.session_state: st.session_state["ciudades_amigos"] = {}
 
 @st.cache_resource
 def load_ocr():
@@ -18,42 +16,39 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_fila_posicional(bloques):
-    # Ordenar bloques por posición X (izquierda a derecha)
-    bloques.sort(key=lambda x: x[0][0][0])
+def procesar_fila_posicional(bloques_brutos):
+    # FILTRO DE SEGURIDAD: Solo procesamos los que tienen formato [bbox, texto, prob]
+    bloques_validos = []
+    for b in bloques_brutos:
+        if isinstance(b, (list, tuple)) and len(b) >= 2 and isinstance(b[0], (list, tuple)):
+            bloques_validos.append(b)
+            
+    # Ordenar por coordenada X
+    bloques_validos.sort(key=lambda x: x[0][0][0])
     
     numeros = []
     nombre_partes = []
     
-    for bbox, texto in bloques:
-        texto_clean = texto.replace(".", "").replace(",", "").strip()
+    for bbox, texto in bloques_validos:
+        texto_clean = str(texto).replace(".", "").replace(",", "").strip()
         if texto_clean.isdigit():
             numeros.append(int(texto_clean))
         elif len(texto_clean) > 2:
             nombre_partes.append(texto_clean)
             
-    # Asignación Posicional Estricta
     datos = {"ID": 0, "Nombre": " ".join(nombre_partes), "Población": 0, "Edificios": 0}
     
-    if len(numeros) >= 1:
-        datos["ID"] = numeros[0] # El de la izquierda es ID
-    
-    # Si detectamos varios números, el ÚLTIMO siempre es Edificios
-    if len(numeros) >= 2:
-        ultimo_valor = numeros[-1]
-        if ultimo_valor <= 330:
-            datos["Edificios"] = ultimo_valor
-            # Si hay números en medio, el resto es Población
-            if len(numeros) > 2:
-                datos["Población"] = numeros[1]
-            elif len(numeros) == 2:
-                # Caso especial: solo hay dos números (ID y Edificios)
-                # Población quedaría en 0 (correcto si no se leyó o está ausente)
-                pass
-        else:
-            # Si el último no es <= 330, asumimos que es Población
-            datos["Población"] = ultimo_valor
-            
+    if numeros:
+        datos["ID"] = numeros[0]
+        if len(numeros) >= 2:
+            # Regla de Oro: El último es edificios (<= 330)
+            if numeros[-1] <= 330:
+                datos["Edificios"] = numeros[-1]
+                if len(numeros) > 2:
+                    datos["Población"] = numeros[1]
+            else:
+                datos["Población"] = numeros[-1]
+                
     return datos
 
 def procesar_imagen(archivo):
@@ -62,21 +57,32 @@ def procesar_imagen(archivo):
     resultados = reader.readtext(img)
     
     filas = {}
-    for (bbox, texto, prob) in resultados:
-        y = int((bbox[0][1] + bbox[2][1]) / 2)
+    for res in resultados:
+        y = int((res[0][0][1] + res[0][2][1]) / 2)
         agrupado = False
         for y_base in filas:
-            if abs(y_base - y) < 20:
-                filas[y_base].append((bbox, texto))
+            if abs(y_base - y) < 25:
+                filas[y_base].append(res)
                 agrupado = True
                 break
-        if not agrupado:
-            filas[y] = [(bbox, texto)]
+        if not agrupado: filas[y] = [res]
             
     ciudades = {}
     for y in filas:
-        # Filtrar encabezados
-        if any("id" in b[1].lower() for b in filas[y]): continue
-            
+        if any("id" in str(b[1]).lower() for b in filas[y]): continue
         ciudad = procesar_fila_posicional(filas[y])
-        if 0 < ciudad
+        if 0 < ciudad["ID"] < 1000: ciudades[ciudad["ID"]] = ciudad
+    return ciudades
+
+# --- UI ---
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("👤 Mis Ciudades")
+    files = st.file_uploader("Sube tus capturas", accept_multiple_files=True, key="m")
+    if files:
+        for f in files: st.session_state["mis_ciudades"].update(procesar_imagen(f))
+    st.dataframe(sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"]))
+
+with col2:
+    st.subheader("👥 Ciudades Amigos")
+    files2 = st.file_uploader("Sube capturas amigos", accept_multiple_files=True, key="a")
