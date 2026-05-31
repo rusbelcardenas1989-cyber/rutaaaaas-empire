@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 
 st.set_page_config(layout="wide")
-st.title("⚔️ Buscador de Ciudades: Emparejamiento por ID")
+st.title("⚔️ Gestor de Ciudades: Biblioteca y Emparejamiento")
 
 @st.cache_resource
 def load_ocr():
@@ -15,7 +15,6 @@ def load_ocr():
 reader = load_ocr()
 
 def limpiar_num(texto):
-    # Elimina todo lo que no sea dígito
     return int(re.sub(r'[^\d]', '', str(texto)))
 
 def procesar_captura(archivo):
@@ -35,7 +34,6 @@ def procesar_captura(archivo):
         t = filas[y]
         if len(t) >= 4:
             try:
-                # Asumimos: ID, Nombre, Población, Edificios
                 data.append({
                     "ID": t[0], 
                     "Nombre": t[1],
@@ -45,12 +43,10 @@ def procesar_captura(archivo):
             except: continue
     return pd.DataFrame(data)
 
-# --- Interfaz ---
+# --- UI: CARGA DE DATOS ---
 col1, col2 = st.columns(2)
-with col1:
-    f_yo = st.file_uploader("👤 Mis Ciudades (1 captura)", type=['png', 'jpg'])
-with col2:
-    f_amigos = st.file_uploader("👥 Ciudades Amigos (Varias capturas)", type=['png', 'jpg'], accept_multiple_files=True)
+f_yo = col1.file_uploader("👤 Subir Mis Ciudades", type=['png', 'jpg'])
+f_amigos = col2.file_uploader("👥 Subir Ciudades Amigos", type=['png', 'jpg'], accept_multiple_files=True)
 
 if f_yo and f_amigos:
     df_yo = procesar_captura(f_yo)
@@ -58,28 +54,37 @@ if f_yo and f_amigos:
     for f in f_amigos:
         df_amigos_total = pd.concat([df_amigos_total, procesar_captura(f)])
     
+    # --- APARTADO 1: BIBLIOTECA ---
+    st.divider()
+    st.subheader("📋 Biblioteca de Ciudades")
+    tab1, tab2 = st.tabs(["Mis Ciudades", "Ciudades Amigos"])
+    tab1.table(df_yo)
+    tab2.table(df_amigos_total)
+    
+    # --- APARTADO 2: MOTOR DE RECOMENDACIÓN ---
+    st.divider()
+    st.subheader("🎯 Recomendaciones de Emparejamiento")
     matches = []
     for _, yo in df_yo.iterrows():
         for _, amigo in df_amigos_total.iterrows():
             dif_edif = abs(yo['Edificios'] - amigo['Edificios'])
             dif_pob = abs(yo['Poblacion'] - amigo['Poblacion'])
             
-            # Filtro: Diferencia de edificios <= 20
-            # Filtro: Diferencia de población <= 4999 (hacia arriba o abajo)
             if dif_edif <= 20 and dif_pob <= 4999:
                 matches.append({
                     "Mi ID": yo['ID'],
                     "Mi Ciudad": yo['Nombre'],
                     "Ciudad Amigo": amigo['Nombre'],
+                    "ID Amigo": amigo['ID'],
                     "Dif. Edificios": dif_edif,
                     "Dif. Población": dif_pob
                 })
     
     if matches:
         res_df = pd.DataFrame(matches)
-        # Ordenamos por tu ID para que sea más fácil de leer
-        res_df = res_df.sort_values(by="Mi ID")
-        st.success(f"¡Encontradas {len(res_df)} opciones óptimas!")
-        st.table(res_df)
+        # Ordenar por tu ID y luego por mejor coincidencia (menor diferencia total)
+        res_df['Score'] = res_df['Dif. Edificios'] + (res_df['Dif. Población'] / 1000)
+        res_df = res_df.sort_values(by=["Mi ID", "Score"])
+        st.table(res_df.drop(columns=['Score']))
     else:
-        st.warning("No se encontraron ciudades que cumplan el rango de ±4999 de población y ±20 edificios.")
+        st.warning("No se encontraron ciudades que cumplan el rango de ±4999 población y ±20 edificios.")
