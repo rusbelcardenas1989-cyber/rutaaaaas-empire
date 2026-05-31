@@ -5,17 +5,15 @@ import re
 import numpy as np
 import cv2
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Optimizador de Rutas")
 st.title("💰 Optimizador de Rutas (Max. Oro)")
 
-# 1. Cargar OCR (Caché para velocidad)
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['es'], gpu=False)
 
 reader = load_ocr()
 
-# 2. Funciones de procesamiento
 def limpiar_num(texto):
     return int(re.sub(r'[^\d]', '', str(texto)))
 
@@ -45,37 +43,41 @@ def procesar_captura(archivo):
             except: continue
     return pd.DataFrame(data)
 
-# 3. INTERFAZ Y LÓGICA (Definir variables ANTES de usarlas)
-col1, col2 = st.columns(2)
-f_yo = col1.file_uploader("👤 Subir Mis Ciudades", type=['png', 'jpg'])
-f_amigos = col2.file_uploader("👥 Subir Ciudades Amigos", type=['png', 'jpg'], accept_multiple_files=True)
+# --- SIDEBAR DE CARGA ---
+st.sidebar.header("📂 Carga de Datos")
+f_yo = st.sidebar.file_uploader("👤 Subir Mis Ciudades", type=['png', 'jpg'])
+f_amigos = st.sidebar.file_uploader("👥 Subir Ciudades Amigos", type=['png', 'jpg'], accept_multiple_files=True)
 
-# 4. Ejecución solo si hay archivos
-if f_yo is not None and f_amigos:
+if f_yo and f_amigos:
     df_yo = procesar_captura(f_yo)
     df_amigos_total = pd.concat([procesar_captura(f) for f in f_amigos])
     
-    st.subheader("🚀 Rutas Sugeridas")
-    ruta_sugerida = []
+    # --- PESTAÑAS DE VISTA ---
+    tab1, tab2, tab3 = st.tabs(["📋 Mi Biblioteca", "👥 Biblioteca Amigos", "🎯 Matriz de Emparejamiento"])
     
-    for _, yo in df_yo.iterrows():
-        # Filtro: Dif Edif <= 20 Y Dif Pob <= 4999
-        opciones = df_amigos_total[
-            (abs(df_amigos_total['Edificios'] - yo['Edificios']) <= 20) & 
-            (abs(df_amigos_total['Poblacion'] - yo['Poblacion']) <= 4999)
-        ]
+    with tab1:
+        st.table(df_yo)
+    with tab2:
+        st.table(df_amigos_total)
         
-        for _, mejor in opciones.iterrows():
-            ruta_sugerida.append({
-                "Mi Ciudad": yo['Nombre'],
-                "Mi ID": yo['ID'],
-                "-> Enrutar con ID": mejor['ID'],
-                "Ciudad Destino": mejor['Nombre'],
-                "Dif. Edif": abs(yo['Edificios'] - mejor['Edificios']),
-                "Dif. Pob": abs(yo['Poblacion'] - mejor['Poblacion'])
-            })
-
-    if ruta_sugerida:
-        st.table(pd.DataFrame(ruta_sugerida))
-    else:
-        st.warning("No se encontraron ciudades compatibles con esos rangos.")
+    with tab3:
+        st.subheader("🔗 IDs Compatibles para Rutas")
+        recomendaciones = []
+        for _, yo in df_yo.iterrows():
+            opciones = df_amigos_total[
+                (abs(df_amigos_total['Edificios'] - yo['Edificios']) <= 20) & 
+                (abs(df_amigos_total['Poblacion'] - yo['Poblacion']) <= 4999)
+            ]
+            if not opciones.empty:
+                ids_lista = opciones['ID'].unique().tolist()
+                recomendaciones.append({
+                    "Tu Ciudad (ID)": f"{yo['Nombre']} ({yo['ID']})",
+                    "IDs Amigos Recomendados": ", ".join(ids_lista)
+                })
+        
+        if recomendaciones:
+            st.table(pd.DataFrame(recomendaciones))
+        else:
+            st.warning("No se encontraron coincidencias bajo los criterios (±20 Edif, ±4999 Pob).")
+else:
+    st.info("Por favor, sube una imagen tuya y al menos una de tus amigos para comenzar.")
