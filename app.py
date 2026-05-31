@@ -73,64 +73,8 @@ def procesar_tabla_inteligente(archivos_subidos):
                 
                 if solo_num.isdigit() and len(solo_num) > 0:
                     val_num = int(solo_num)
-                    # Guardamos el número junto con su posición X
                     try:
                         x_inicio = int(bbox[0][0])
                     except:
                         x_inicio = 0
-                    numeros_encontrados.append((x_inicio, val_num))
-                else:
-                    # Si contiene texto, es parte del Nombre de la ciudad
-                    if len(texto_limpio) > 1:
-                        nombre_detectado.append(texto_limpio)
-            
-            if numeros_encontrados:
-                # Ordenamos de izquierda a derecha por posición X
-                numeros_ordenados = sorted(numeros_encontrados, key=lambda x: x[0])
-                
-                # El primero de la izquierda es el ID obligatoriamente
-                id_detectado = int(numeros_ordenados[0][1])
-                
-                poblacion = 0
-                edificios = 0
-                
-                # Evaluamos matemáticamente los demás números de la fila
-                for _, num in numeros_ordenados[1:]:
-                    if 1000 <= num <= 99999:
-                        poblacion = num
-                    elif 1 <= num <= 330:
-                        edificios = num
-                
-                # Si el ID es válido, guardamos la información de la ciudad
-                if id_detectado is not None and id_detectado < 1000:
-                    nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
-                    
-                    # Guardar solo si se logró extraer al menos un dato numérico clave
-                    if poblacion > 0 or edificios > 0:
-                        ciudades_extraidas[id_detectado] = {
-                            "ID": int(id_detectado),
-                            "Nombre": str(nombre_final),
-                            "Población": int(poblacion),
-                            "Edificios": int(edificios)
-                        }
-                    
-    return ciudades_extraidas
-
-# --- INTERFAZ GRÁFICA ---
-col_izq, col_der = st.columns(2)
-
-with col_izq:
-    st.subheader("👤 1. MIS CIUDADES (Prioritarias)")
-    mis_archivos = st.file_uploader("Sube TU captura aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
-    if mis_archivos:
-        st.session_state["mis_ciudades"].update(procesar_tabla_inteligente(mis_archivos))
-    
-    if st.session_state["mis_ciudades"]:
-        lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
-        st.dataframe(lista_mia, use_container_width=True)
-
-with col_der:
-    st.subheader("👥 2. CIUDADES DE MIS AMIGOS")
-    archivos_amigos = st.file_uploader("Sube las de tus AMIGOS aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ami_up")
-    if archivos_amigos:
-        st.session_state["ciudades_amigos"].update(procesar_
+                    numeros_encontrados.
