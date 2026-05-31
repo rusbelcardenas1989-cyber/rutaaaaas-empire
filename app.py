@@ -4,7 +4,7 @@ import numpy as np
 import easyocr
 
 st.set_page_config(layout="wide")
-st.title("⚔️ Extractor de Rejilla Estricta")
+st.title("⚔️ Extractor por proximidad espacial")
 
 @st.cache_resource
 def load_ocr():
@@ -12,31 +12,39 @@ def load_ocr():
 
 reader = load_ocr()
 
-def procesar_imagen_rejilla(archivo):
+def extraer_filas(archivo):
     file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    # Aumentamos el detalle de detección
+    # Detectamos todo el texto
     results = reader.readtext(img)
     
-    # Definimos zonas X aproximadas según tu imagen (ajustables)
-    # Col 1: ID, Col 2: Nombre, Col 3: Población, Col 4: Edificios
-    columnas = { "ID": [], "Nombre": [], "Pob": [], "Edif": [] }
-    
+    # 1. Agrupar por línea (coordenada Y)
+    filas = {}
     for (bbox, text, prob) in results:
-        x = bbox[0][0]
-        # Clasificamos según la coordenada X (basado en el ancho total de 1222.png)
-        # Estos valores son una estimación de la posición horizontal
-        if x < 100: columnas["ID"].append(text)
-        elif 100 <= x < 350: columnas["Nombre"].append(text)
-        elif 350 <= x < 650: columnas["Pob"].append(text)
-        elif x >= 650: columnas["Edif"].append(text)
+        y = int(bbox[0][1])
+        # Buscamos si ya existe una fila similar
+        encontrado = False
+        for y_base in filas.keys():
+            if abs(y_base - y) < 20: # Margen de error vertical
+                filas[y_base].append((bbox[0][0], text))
+                encontrado = True
+                break
+        if not encontrado:
+            filas[y] = [(bbox[0][0], text)]
+            
+    # 2. Ordenar cada fila por X
+    datos_finales = []
+    for y in filas:
+        fila = sorted(filas[y], key=lambda x: x[0])
+        # Intentamos extraer: [ID, Nombre, Población, Edificios]
+        # El nombre puede tener espacios, así que lo reconstruimos
+        texto_fila = [x[1] for x in fila]
+        datos_finales.append(texto_fila)
         
-    return columnas
+    return datos_finales
 
-# UI
 files = st.file_uploader("Sube capturas", accept_multiple_files=True)
 if files:
     for f in files:
-        cols = procesar_imagen_rejilla(f)
-        st.write("Datos detectados por columna (puedes verificar si los datos coinciden):")
-        st.json(cols)
+        data = extraer_filas(f)
+        st.write(data)
