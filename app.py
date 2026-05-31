@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 import easyocr
 
-st.set_page_config(page_title="Extractor de Rutas - Modo Definitivo", layout="wide")
+st.set_page_config(page_title="Extractor de Rutas - Modo Infalible", layout="wide")
 
 st.title("⚔️ Panel de Control - Extractor Inteligente")
-st.write("Sube tus capturas. Clasificación matemática exacta por rangos de valores.")
+st.write("Sube tus capturas. Clasificación estructural por posición de columnas.")
 
 # Almacenamiento en memoria permanente de la sesión
 if "mis_ciudades" not in st.session_state:
@@ -46,21 +46,20 @@ def procesar_tabla_inteligente(archivos_subidos):
         for elemento in resultados_ocr:
             bbox = elemento[0]
             texto = elemento[1]
-            
             y_centro = int((bbox[0][1] + bbox[2][1]) / 2)
             
             encontrado = False
             for y_base in filas.keys():
-                if abs(y_base - y_centro) < 18:  # Tolerancia de fila para agrupar en la misma línea
+                if abs(y_base - y_centro) < 18:  # Tolerancia de fila estándar
                     filas[y_base].append((bbox, texto))
                     encontrado = True
                     break
             if not encontrado:
                 filas[y_centro] = [(bbox, texto)]
         
-        # 2. Procesar fila por fila en orden de arriba hacia abajo
+        # 2. Procesar fila por fila
         for y_coord in sorted(filas.keys()):
-            # Forzar el orden de los bloques de izquierda a derecha usando la coordenada X
+            # Forzar el orden de los bloques estrictamente de izquierda a derecha (X)
             bloques = sorted(filas[y_coord], key=lambda x: x[0][0][0])
             
             id_detectado = None
@@ -70,40 +69,50 @@ def procesar_tabla_inteligente(archivos_subidos):
             for bbox, texto in bloques:
                 texto_limpio = str(texto).strip()
                 
-                # Descartar los encabezados de la tabla
+                # Descartar encabezados comunes de la tabla
                 if not texto_limpio or any(w in texto_limpio.lower() for w in ["id", "nombre", "pob", "edi", "regi", "ciudad"]):
                     continue
                 
-                # Extraer únicamente los dígitos numéricos
-                solo_num = "".join([c for c in texto_limpio if c.isdigit()])
+                # Reemplazar puntos o comas que rompen los miles (ej: 38.648 -> 38648)
+                texto_procesado = texto_limpio.replace(".", "").replace(",", "")
+                solo_num = "".join([c for c in texto_procesado if c.isdigit()])
                 
                 if solo_num.isdigit() and len(solo_num) > 0:
                     val_num = int(solo_num)
                     x_inicio = int(bbox[0][0])
                     numeros_encontrados.append((x_inicio, val_num))
                 else:
-                    # Todo lo que no sea número puro va al Nombre
                     if len(texto_limpio) > 1:
                         nombre_detectado.append(texto_limpio)
             
+            # --- ASIGNACIÓN POSICIONAL DEFINITIVA ---
             if numeros_encontrados:
-                # Ordenar los números detectados estrictamente de izquierda a derecha
+                # Ordenar de izquierda a derecha por su coordenada X en la pantalla
                 numeros_ordenados = sorted(numeros_encontrados, key=lambda x: x[0])
                 
-                # El primer número de la izquierda es el ID de la ciudad
+                # REGLA 1: El primer número de la izquierda es SIEMPRE el ID
                 id_detectado = int(numeros_ordenados[0][1])
                 
                 poblacion = 0
                 edificios = 0
                 
-                # Clasificar matemáticamente los siguientes números por sus valores reales
-                for _, num in numeros_ordenados[1:]:
-                    if 1000 <= num <= 99999:
-                        poblacion = num
-                    elif 1 <= num <= 330:
-                        edificios = num
+                # Si tenemos más datos numéricos en la fila además del ID
+                if len(numeros_ordenados) > 1:
+                    resto_numeros = numeros_ordenados[1:]
+                    
+                    # REGLA 2: El último número de la derecha son los Edificios
+                    edificios = int(resto_numeros[-1][1])
+                    
+                    # REGLA 3: Si queda un elemento en medio, es la Población
+                    if len(resto_numeros) > 1:
+                        poblacion = int(resto_numeros[0][1])
+                    else:
+                        # Si solo hay un número extra, evaluamos si es grande (Población) o chico (Edificios)
+                        if edificios >= 1000:
+                            poblacion = edificios
+                            edificios = 0
                 
-                # Guardar en el diccionario final si el ID cumple con el formato estándar
+                # Guardar registro en la base de datos si el ID es válido
                 if id_detectado is not None and id_detectado < 1000:
                     nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
                     
@@ -116,7 +125,7 @@ def procesar_tabla_inteligente(archivos_subidos):
                     
     return ciudades_extraidas
 
-# --- INTERFAZ GRÁFICA CORREGIDA (Visualización Fija) ---
+# --- INTERFAZ GRÁFICA ---
 col_izq, col_der = st.columns(2)
 
 with col_izq:
@@ -128,7 +137,6 @@ with col_izq:
         if datos_mios:
             st.session_state["mis_ciudades"].update(datos_mios)
     
-    # Se muestra siempre la tabla, vacía o con datos cargados
     lista_mia = sorted(list(st.session_state["mis_ciudades"].values()), key=lambda x: x["ID"])
     st.dataframe(lista_mia, use_container_width=True)
 
@@ -141,7 +149,6 @@ with col_der:
         if datos_amigos:
             st.session_state["ciudades_amigos"].update(datos_amigos)
     
-    # Se muestra siempre la tabla de amigos al lado derecho
     lista_amigos = sorted(list(st.session_state["ciudades_amigos"].values()), key=lambda x: x["ID"])
     st.dataframe(lista_amigos, use_container_width=True)
 
