@@ -56,14 +56,28 @@ def procesar_tabla_inteligente(archivos_subidos):
         
         # 2. Procesar cada fila de forma lógica y sencilla
         for y_coord in sorted(filas.keys()):
-            bloques = sorted(filas[y_coord], key=lambda x: x[0][0][0]) # Forzar orden físico izquierda a derecha
+            # Ordenar de izquierda a derecha de forma ultra-segura
+            try:
+                bloques = sorted(filas[y_coord], key=lambda x: x[0][0][0])
+            except (IndexError, TypeError, ValueError):
+                bloques = filas[y_coord]
             
             id_detectado = None
             nombre_detectado = []
             numeros_encontrados = []
             
-            for bbox, texto in bloques:
-                texto_limpio = texto.strip()
+            for bloque in bloques:
+                try:
+                    bbox, texto = bloque[0], bloque[1]
+                    x_inicio = int(bbox[0][0])
+                except (IndexError, TypeError, ValueError):
+                    x_inicio = 0
+                    if isinstance(bloque, tuple) and len(bloque) >= 2:
+                        texto = bloque[1]
+                    else:
+                        continue
+                
+                texto_limpio = str(texto).strip()
                 # Ignorar encabezados de la tabla
                 if not texto_limpio or any(w in texto_limpio.lower() for w in ["id", "nombre", "pob", "edi", "regi", "ciudad"]):
                     continue
@@ -73,8 +87,44 @@ def procesar_tabla_inteligente(archivos_subidos):
                 
                 if solo_num.isdigit() and len(solo_num) > 0:
                     val_num = int(solo_num)
-                    try:
-                        x_inicio = int(bbox[0][0])
-                    except:
-                        x_inicio = 0
-                    numeros_encontrados.
+                    numeros_encontrados.append((x_inicio, val_num))
+                else:
+                    if len(texto_limpio) > 1:
+                        nombre_detectado.append(texto_limpio)
+            
+            if numeros_encontrados:
+                # Ordenamos de izquierda a derecha por posición X
+                numeros_ordenados = sorted(numeros_encontrados, key=lambda x: x[0])
+                
+                # El primero de la izquierda es el ID
+                id_detectado = int(numeros_ordenados[0][1])
+                
+                poblacion = 0
+                edificios = 0
+                
+                # Evaluamos matemáticamente los demás números de la fila
+                for _, num in numeros_ordenados[1:]:
+                    if 1000 <= num <= 99999:
+                        poblacion = num
+                    elif 1 <= num <= 330:
+                        edificios = num
+                
+                # Guardar la información si el ID es de ciudad válido
+                if id_detectado is not None and id_detectado < 1000:
+                    nombre_final = " ".join(nombre_detectado) if nombre_detectado else f"Ciudad {id_detectado}"
+                    
+                    ciudades_extraidas[id_detectado] = {
+                        "ID": int(id_detectado),
+                        "Nombre": str(nombre_final),
+                        "Población": int(poblacion),
+                        "Edificios": int(edificios)
+                    }
+                    
+    return ciudades_extraidas
+
+# --- INTERFAZ GRÁFICA ---
+col_izq, col_der = st.columns(2)
+
+with col_izq:
+    st.subheader("👤 1. MIS CIUDADES (Prioritarias)")
+    mis_archivos = st.file_uploader("Sube TU captura aquí...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="mis_up")
