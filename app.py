@@ -98,4 +98,30 @@ if uploaded_file is not None:
         
         st.subheader("🎯 Parejas Óptimas Encontradas")
         parejas = []
-        n =
+        n = len(ciudades_procesadas)
+        
+        for i in range(n):
+            for j in range(i + 1, n):
+                c1 = ciudades_procesadas[i]
+                c2 = ciudades_procesadas[j]
+                
+                dif_pob = abs(c1["poblacion"] - c2["poblacion"])
+                dif_edi = abs(c1["edificios"] - c2["edificios"])
+                
+                # Tu condición estricta
+                if dif_pob == 4999 and dif_edi == 20:
+                    parejas.append((c1, c2))
+
+        if parejas:
+            for c1, c2 in parejas:
+                st.success(f"¡Combinación perfecta encontrada!")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(label=f"Ciudad ID {c1['id']}", value=f"{c1['edificios']} Edificios", delta=f"{c1['poblacion']} Población")
+                with col2:
+                    st.metric(label=f"Ciudad ID {c2['id']}", value=f"{c2['edificios']} Edificios", delta=f"{c2['poblacion']} Población")
+                st.write("---")
+        else:
+            st.info("No se encontraron ciudades con la diferencia exacta (20 edif. y 4999 pob.) en esta imagen.")
+    else:
+        st.error("No se detectaron filas completas. Asegúrate de que la captura muestre la tabla completa de borde a borde.")
